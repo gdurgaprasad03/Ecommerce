@@ -14,14 +14,15 @@ SECRET_KEY = os.getenv(
 
 DEBUG = os.getenv("DJANGO_DEBUG", "True").lower() in ["true", "1"]
 
-ALLOWED_HOSTS = [
-    host.strip()
-    for host in os.getenv(
-        "DJANGO_ALLOWED_HOSTS",
-        "127.0.0.1,localhost,192.168.0.113"
-    ).split(",")
-    if host.strip()
-]
+# ALLOWED_HOSTS = [
+#     host.strip()
+#     for host in os.getenv(
+#         "DJANGO_ALLOWED_HOSTS",
+#         "127.0.0.1,localhost,192.168.0.113"
+#     ).split(",")
+#     if host.strip()
+# ]
+ALLOWED_HOSTS = ['*']
 
 CORS_ALLOWED_ORIGINS = [
     origin.strip()
