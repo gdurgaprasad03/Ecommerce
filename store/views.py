@@ -918,3 +918,7 @@ class DashboardAPIView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+def home(request):
+    return HttpResponse("Backend is running 🚀")

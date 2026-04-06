@@ -20,8 +20,10 @@ from django.conf import settings
 from django.conf.urls.static import static
 from django.views.static import serve
 from django.urls import re_path
+from store.views import home
 
 urlpatterns = [
+     path('', home),
     path('admin/', admin.site.urls),
     path('api/', include('store.urls')),
     re_path(r'^media/(?P<path>.*)$', serve, {'document_root': settings.MEDIA_ROOT}),
