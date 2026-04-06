@@ -1,7 +1,7 @@
 import logging
 import secrets
 from datetime import timedelta
-
+from django.http import HttpResponse
 from django.conf import settings
 from django.contrib.auth import authenticate
 from django.contrib.auth.hashers import make_password
