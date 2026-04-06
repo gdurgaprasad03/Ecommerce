@@ -1,0 +1,55 @@
+from django.urls import path
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+
+from .views import (
+    CategoryAPIView,
+    BrandAPIView,
+    BrandDetailAPIView,
+    CategoryDetailAPIView,
+    CustomerRegistrationAPIView,
+    CustomerRequestAPIView,
+    InventoryAPIView,
+    InventoryDetailAPIView,
+    LoginAPIView,
+    LogoutAPIView,
+    PasswordResetConfirmAPIView,
+    PasswordResetRequestAPIView,
+    ProductAPIView,
+    ProductDetailAPIView,
+    ProductImageAPIView,
+    ProductSpecificationAPIView,
+    ResendOTPAPIView,
+    SubCategoryAPIView,
+    VerifyOTPAPIView,
+    DashboardAPIView,
+)
+
+urlpatterns = [
+    path("register/", CustomerRegistrationAPIView.as_view(), name="register"),
+    path("verify-otp/", VerifyOTPAPIView.as_view(), name="verify-otp"),
+    path("resend-otp/", ResendOTPAPIView.as_view(), name="resend-otp"),
+    path("login/", LoginAPIView.as_view(), name="login"),
+    path("logout/", LogoutAPIView.as_view(), name="logout"),
+    path("reset-password/", PasswordResetRequestAPIView.as_view(), name="reset-password"),
+    path("confirm-password/", PasswordResetConfirmAPIView.as_view(), name="confirm-password"),
+    path("token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
+    path("token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
+    path("categories/", CategoryAPIView.as_view(), name="category-list-create"),
+    path("categories/<int:pk>/", CategoryDetailAPIView.as_view(), name="category-detail"),
+    path("categories/<int:pk>/subcategories/", SubCategoryAPIView.as_view(), name="subcategory-list-create"),
+    path("brands/", BrandAPIView.as_view(), name="brand-list-create"),
+    path("brands/<int:pk>/", BrandDetailAPIView.as_view(), name="brand-detail"),
+    path("products/", ProductAPIView.as_view(), name="product-list-create"),
+    path("products/<int:pk>/", ProductDetailAPIView.as_view(), name="product-detail"),
+    path("images/", ProductImageAPIView.as_view(), name="image-list-create"),
+    path("images/<int:pk>/", ProductImageAPIView.as_view(), name="image-detail"),
+    path("specifications/", ProductSpecificationAPIView.as_view(), name="spec-list-create"),
+    path("specifications/<int:pk>/", ProductSpecificationAPIView.as_view(), name="spec-detail"),
+    path("inventory/", InventoryAPIView.as_view(), name="inventory-list-create"),
+    path("inventory/<int:pk>/", InventoryDetailAPIView.as_view(), name="inventory-detail"),
+    path("requests/", CustomerRequestAPIView.as_view(), name="request-list-create"),
+    path("requests/<int:pk>/", CustomerRequestAPIView.as_view(), name="request-detail"),
+    path("dashboard/", DashboardAPIView.as_view(), name="dashboard"),
+
+]
+
