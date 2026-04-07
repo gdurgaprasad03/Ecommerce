@@ -404,8 +404,8 @@ class LoginAPIView(APIView):
         return Response(
             {
                 "message": "Login successful.",
-                "access_token": str(refresh.access_token),
-                "refresh_token": str(refresh),
+                "access": str(refresh.access_token),
+                "refresh": str(refresh),
                 "username": user.username,
                 "is_staff": user.is_staff,
             },
