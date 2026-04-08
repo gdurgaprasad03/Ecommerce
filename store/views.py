@@ -24,6 +24,7 @@ from rest_framework.throttling import AnonRateThrottle, ScopedRateThrottle
 from rest_framework.views import APIView
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
+from threading import Thread
 
 from .models import (
     Category,
@@ -822,21 +823,26 @@ class CustomerRequestAPIView(PaginatedAPIView):
         serializer.is_valid(raise_exception=True)
         request_obj = serializer.save()
 
-        transaction.on_commit(
-            lambda: safe_send_mail(
-                f"New Product Request - {request_obj.product.name}",
-                (
-                    f"New customer inquiry received.\n\n"
-                    f"Customer Name: {request_obj.name}\n"
-                    f"Email: {request_obj.email}\n"
-                    f"Phone: {request_obj.phone}\n"
-                    f"Product: {request_obj.product.name}\n"
-                    f"Quantity: {request_obj.quantity}\n"
-                    f"Description:\n{request_obj.description}"
-                ),
-                [settings.SALES_NOTIFICATION_EMAIL],
-            )
-        )
+        def send_email_safe(obj):
+            try:
+                product_name = obj.product.name if obj.product else "N/A"
+                safe_send_mail(
+                    f"New Product Request - {product_name}",
+                    (
+                        f"New customer inquiry received.\n\n"
+                        f"Customer Name: {obj.name}\n"
+                        f"Email: {obj.email}\n"
+                        f"Phone: {obj.phone}\n"
+                        f"Product: {product_name}\n"
+                        f"Quantity: {obj.quantity}\n"
+                        f"Description:\n{obj.description}"
+                    ),
+                    [getattr(settings, "SALES_NOTIFICATION_EMAIL", "")]
+                )
+            except Exception:
+                logger.exception("Email failed", extra={"request_id": obj.id})
+
+        Thread(target=send_email_safe, args=(request_obj,), daemon=True).start()
 
         return Response(
             {"status": True, "message": "Request submitted successfully."},
