@@ -5,6 +5,7 @@ from rest_framework import serializers
 from .models import (
     Category,
     Brand,
+    CustomerProfile,
     CustomerRequest,
     Inventory,
     OTPVerification,
@@ -171,14 +172,64 @@ class CustomerRequestStatusSerializer(serializers.ModelSerializer):
         return value
 
 
+# class CustomerRegistrationSerializer(serializers.ModelSerializer):
+#     password = serializers.CharField(write_only=True, min_length=8)
+#     username = serializers.CharField(required=False, allow_blank=True)
+#     email = serializers.EmailField(required=True)
+
+#     class Meta:
+#         model = User
+#         fields = ["username", "email", "password", "first_name", "last_name"]
+
+#     def validate(self, attrs):
+#         email = attrs["email"].strip().lower()
+#         username = attrs.get("username", "").strip() or email
+
+#         existing_user = User.objects.filter(email__iexact=email).first()
+#         if existing_user and existing_user.is_active:
+#             raise serializers.ValidationError({"email": "User with this email already exists."})
+
+#         username_exists = User.objects.filter(username__iexact=username).first()
+#         if username_exists:
+#             # If the username exists and belongs to a DIFFERENT email, it's a conflict
+#             if username_exists.email.lower() != email:
+#                 raise serializers.ValidationError({"username": "This username is already taken."})
+#             # If it's the same email but the user is active, it's already handled by the email check
+
+
+
+#         attrs["email"] = email
+#         attrs["username"] = username
+#         validate_password(attrs["password"])
+#         return attrs
+
+#     def create(self, validated_data):
+#         return User.objects.create_user(
+#             username=validated_data["username"],
+#             email=validated_data["email"],
+#             password=validated_data["password"],
+#             first_name=validated_data.get("first_name", "").strip(),
+#             last_name=validated_data.get("last_name", "").strip(),
+#             is_active=False,
+#         )
 class CustomerRegistrationSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=8)
     username = serializers.CharField(required=False, allow_blank=True)
     email = serializers.EmailField(required=True)
+    company_name = serializers.CharField(required=True, max_length=255)
+    company_address = serializers.CharField(required=True)
 
     class Meta:
         model = User
-        fields = ["username", "email", "password", "first_name", "last_name"]
+        fields = [
+            "username",
+            "email",
+            "password",
+            "first_name",
+            "last_name",
+            "company_name",
+            "company_address",
+        ]
 
     def validate(self, attrs):
         email = attrs["email"].strip().lower()
@@ -189,28 +240,16 @@ class CustomerRegistrationSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"email": "User with this email already exists."})
 
         username_exists = User.objects.filter(username__iexact=username).first()
-        if username_exists:
-            # If the username exists and belongs to a DIFFERENT email, it's a conflict
-            if username_exists.email.lower() != email:
-                raise serializers.ValidationError({"username": "This username is already taken."})
-            # If it's the same email but the user is active, it's already handled by the email check
-
-
+        if username_exists and username_exists.email.lower() != email:
+            raise serializers.ValidationError({"username": "This username is already taken."})
 
         attrs["email"] = email
         attrs["username"] = username
+        attrs["company_name"] = attrs["company_name"].strip()
+        attrs["company_address"] = attrs["company_address"].strip()
+
         validate_password(attrs["password"])
         return attrs
-
-    def create(self, validated_data):
-        return User.objects.create_user(
-            username=validated_data["username"],
-            email=validated_data["email"],
-            password=validated_data["password"],
-            first_name=validated_data.get("first_name", "").strip(),
-            last_name=validated_data.get("last_name", "").strip(),
-            is_active=False,
-        )
 
 
 class OTPVerifySerializer(serializers.Serializer):

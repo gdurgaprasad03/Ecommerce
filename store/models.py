@@ -177,3 +177,17 @@ class OTPVerification(models.Model):
 
     def __str__(self):
         return f"{self.user.username} - {self.otp}"
+
+
+class CustomerProfile(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="customer_profile")
+    company_name = models.CharField(max_length=255)
+    company_address = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.user.username} - {self.company_name}"

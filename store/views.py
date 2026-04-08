@@ -29,6 +29,7 @@ from threading import Thread
 from .models import (
     Category,
     Brand,
+    CustomerProfile,
     CustomerRequest,
     Inventory,
     OTPVerification,
@@ -193,22 +194,30 @@ class CustomerRegistrationAPIView(APIView):
         validated_data = serializer.validated_data
         email = validated_data["email"].strip().lower()
         username = validated_data.get("username", "").strip() or email
+        company_name = validated_data["company_name"].strip()
+        company_address = validated_data["company_address"].strip()
 
         with transaction.atomic():
             user = User.objects.filter(email__iexact=email).first()
-            
+
             if user:
                 if user.is_active:
                     return Response(
                         {"error": "User with this email already exists."},
                         status=status.HTTP_400_BAD_REQUEST,
                     )
-                # Update info if re-registering
+
                 user.username = username
                 user.password = make_password(validated_data["password"])
                 user.first_name = validated_data.get("first_name", "").strip()
                 user.last_name = validated_data.get("last_name", "").strip()
                 user.save()
+
+                profile, _ = CustomerProfile.objects.get_or_create(user=user)
+                profile.company_name = company_name
+                profile.company_address = company_address
+                profile.save()
+
             else:
                 user = User.objects.create(
                     email=email,
@@ -219,12 +228,19 @@ class CustomerRegistrationAPIView(APIView):
                     is_active=False,
                 )
 
+                CustomerProfile.objects.create(
+                    user=user,
+                    company_name=company_name,
+                    company_address=company_address,
+                )
 
-            # Check resend cooldown
-            otp_verification, created_ov = OTPVerification.objects.get_or_create(user=user, defaults={
-                "otp": generate_otp(),
-                "expires_at": timezone.now() + timedelta(minutes=OTP_EXPIRY_MINUTES)
-            })
+            otp_verification, created_ov = OTPVerification.objects.get_or_create(
+                user=user,
+                defaults={
+                    "otp": generate_otp(),
+                    "expires_at": timezone.now() + timedelta(minutes=OTP_EXPIRY_MINUTES)
+                }
+            )
 
             now = timezone.now()
             if not created_ov:
@@ -233,13 +249,13 @@ class CustomerRegistrationAPIView(APIView):
                         {"error": f"Please wait {OTP_RESEND_COOLDOWN_SECONDS} seconds before requesting another OTP."},
                         status=status.HTTP_429_TOO_MANY_REQUESTS,
                     )
-                
-                # Update OTP
+
                 otp_verification.otp = generate_otp()
                 otp_verification.attempts = 0
                 otp_verification.expires_at = now + timedelta(minutes=OTP_EXPIRY_MINUTES)
                 otp_verification.last_sent_at = now
                 otp_verification.is_verified = False
+                otp_verification.verified_at = None
                 otp_verification.save()
 
             otp = otp_verification.otp
@@ -838,6 +854,18 @@ class CustomerRequestAPIView(PaginatedAPIView):
                         f"Description:\n{obj.description}"
                     ),
                     [getattr(settings, "SALES_NOTIFICATION_EMAIL", "")]
+                )
+                safe_send_mail(
+                    "We received your quote request",
+                    (
+                        f"Dear {obj.name},\n\n"
+                        f"Thank you for reaching out to us.\n"
+                        f"We have successfully received your quote request for {product_name}.\n\n"
+                        f"Our team will contact you soon with the pricing and further details.\n\n"
+                        f"Best regards,\n"
+                        f"Your Company Team"
+                    ),
+                    [obj.email]
                 )
             except Exception:
                 logger.exception("Email failed", extra={"request_id": obj.id})
