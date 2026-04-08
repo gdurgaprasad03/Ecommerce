@@ -70,12 +70,10 @@ class ProductSerializer(serializers.ModelSerializer):
             "name",
             "brand",
             "brand_name",
-
             "mpn",
             "sku",
             "description",
             "highlights",
-
             "rating",
             "featured",
             "top_selling",
