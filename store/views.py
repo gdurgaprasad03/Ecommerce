@@ -29,6 +29,7 @@ from threading import Thread
 from .models import (
     Category,
     Brand,
+    Enquiry,
     CustomerProfile,
     CustomerRequest,
     Inventory,
@@ -956,3 +957,61 @@ class DashboardAPIView(APIView):
 
 def home(request):
     return HttpResponse("Backend is running 🚀")
+
+class EnquiryAPIView(PaginatedAPIView):
+    def get_permissions(self):
+        if self.request.method == "POST":
+            return [AllowAny()]
+        return [IsAdminUser()]
+
+    def get(self, request):
+        queryset = Enquiry.objects.select_related("product").all()
+        return self.paginate(request, queryset, EnquirySerializer)
+
+    def post(self, request):
+        serializer = EnquirySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        enquiry = serializer.save()
+
+        def send_email_safe(obj):
+            try:
+                product_name = obj.product.name if obj.product else "General Enquiry"
+
+                safe_send_mail(
+                    f"New Enquiry - {product_name}",
+                    (
+                        f"New enquiry received.\n\n"
+                        f"Name: {obj.name}\n"
+                        f"Company Name: {obj.company_name}\n"
+                        f"Company Address: {obj.company_address}\n"
+                        f"Email: {obj.email}\n"
+                        f"Phone: {obj.phone}\n"
+                        f"Product: {product_name}\n"
+                        f"Quantity: {obj.quantity}\n"
+                        f"Description:\n{obj.description}"
+                    ),
+                    [getattr(settings, "SALES_NOTIFICATION_EMAIL", "")]
+                )
+
+                safe_send_mail(
+                    "Thank you for your enquiry",
+                    (
+                        f"Dear {obj.name},\n\n"
+                        f"Thank you for contacting us.\n"
+                        f"We have received your enquiry and our team will get in touch with you shortly.\n\n"
+                        f"Product: {product_name}\n"
+                        f"Quantity: {obj.quantity}\n\n"
+                        f"Best regards,\n"
+                        f"Your Company Team"
+                    ),
+                    [obj.email]
+                )
+            except Exception:
+                logger.exception("Enquiry email failed", extra={"enquiry_id": obj.id})
+
+        Thread(target=send_email_safe, args=(enquiry,), daemon=True).start()
+
+        return Response(
+            {"status": True, "message": "Enquiry submitted successfully."},
+            status=status.HTTP_201_CREATED,
+        )

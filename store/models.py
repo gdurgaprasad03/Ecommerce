@@ -191,3 +191,27 @@ class CustomerProfile(models.Model):
 
     def __str__(self):
         return f"{self.user.username} - {self.company_name}"
+
+class Enquiry(models.Model):
+    name = models.CharField(max_length=255)
+    company_name = models.CharField(max_length=255)
+    company_address = models.TextField()
+    product = models.ForeignKey(
+        Product,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="enquiries",
+    )
+    quantity = models.PositiveIntegerField(validators=[MinValueValidator(1)])
+    phone = models.CharField(max_length=20)
+    email = models.EmailField()
+    description = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        product_name = self.product.name if self.product else "General Enquiry"
+        return f"{self.name} - {product_name}"

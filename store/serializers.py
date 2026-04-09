@@ -5,6 +5,7 @@ from rest_framework import serializers
 from .models import (
     Category,
     Brand,
+    Enquiry,
     CustomerProfile,
     CustomerRequest,
     Inventory,
@@ -285,4 +286,40 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
 
     def validate_new_password(self, value):
         validate_password(value)
+        return value
+
+
+class EnquirySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Enquiry
+        fields = [
+            "id",
+            "name",
+            "company_name",
+            "company_address",
+            "product",
+            "quantity",
+            "phone",
+            "email",
+            "description",
+            "created_at",
+        ]
+        read_only_fields = ["created_at"]
+
+    def validate_phone(self, value):
+        normalized = "".join(ch for ch in value if ch.isdigit())
+        if len(normalized) < 10 or len(normalized) > 15:
+            raise serializers.ValidationError("Enter a valid phone number.")
+        return normalized
+
+    def validate_company_name(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Company name is required.")
+        return value
+
+    def validate_company_address(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Company address is required.")
         return value
