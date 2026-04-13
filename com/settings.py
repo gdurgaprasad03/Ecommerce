@@ -1,7 +1,9 @@
 from pathlib import Path
 import os
 from datetime import timedelta
+from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
+import dj_database_url
 
 load_dotenv()
 
@@ -76,23 +78,18 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "com.wsgi.application"
 
-DATABASES = {
-    "default": {
-        "ENGINE": os.getenv("DB_ENGINE", "django.db.backends.sqlite3"),
-        "NAME": os.getenv("DB_NAME", BASE_DIR / "db.sqlite3"),
-    }
-}
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-if os.getenv("DB_ENGINE") == "django.db.backends.postgresql":
-    DATABASES["default"].update(
-        {
-            "USER": os.getenv("DB_USER", ""),
-            "PASSWORD": os.getenv("DB_PASSWORD", ""),
-            "HOST": os.getenv("DB_HOST", "127.0.0.1"),
-            "PORT": os.getenv("DB_PORT", "5432"),
-            "CONN_MAX_AGE": 60,
-        }
+if not DATABASE_URL:
+    raise ImproperlyConfigured("DATABASE_URL must be set for the PostgreSQL database.")
+
+DATABASES = {
+    "default": dj_database_url.parse(
+        DATABASE_URL,
+        conn_max_age=int(os.getenv("DB_CONN_MAX_AGE", "60")),
+        ssl_require=os.getenv("DB_SSL_REQUIRE", "True").lower() in ["true", "1"],
     )
+}
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
