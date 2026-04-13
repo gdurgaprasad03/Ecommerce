@@ -80,10 +80,20 @@ class ProductSerializer(serializers.ModelSerializer):
             "featured",
             "top_selling",
             "new_arrival",
+            "is_active",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["created_at", "updated_at"]
+        read_only_fields = [
+            "id",
+            "category_name",
+            "subcategory_name",
+            "brand_name",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+
 
 
 class ProductImageSerializer(serializers.ModelSerializer):

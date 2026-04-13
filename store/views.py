@@ -38,6 +38,7 @@ from .models import (
     ProductImage,
     ProductSpecification,
 )
+
 from .serializers import (
     CategoryReadSerializer,
     BrandSerializer,
@@ -47,6 +48,7 @@ from .serializers import (
     CustomerRequestSerializer,
     CustomerRequestStatusSerializer,
     InventorySerializer,
+    EnquirySerializer,
     LoginSerializer,
     OTPResendSerializer,
     OTPVerifySerializer,
@@ -602,7 +604,16 @@ class ProductAPIView(PaginatedAPIView):
         return [IsAdminUser()]
 
     def get(self, request):
-        queryset = Product.objects.select_related("category", "subcategory").filter(is_active=True)
+        include_inactive = (
+            request.user.is_authenticated
+            and request.user.is_staff
+            and request.query_params.get("include_inactive", "").lower() == "true"
+        )
+
+        queryset = Product.objects.select_related("brand", "category", "subcategory")
+
+        if not include_inactive:
+            queryset = queryset.filter(is_active=True)
 
         top_selling = request.query_params.get("top_selling")
         featured = request.query_params.get("featured")
@@ -628,10 +639,15 @@ class ProductAPIView(PaginatedAPIView):
         return self.paginate(request, queryset, ProductSerializer)
 
     def post(self, request):
-        serializer = ProductSerializer(data=request.data)
+        data = request.data.copy()
+        data.pop("is_active", None)
+
+        serializer = ProductSerializer(data=data)
         serializer.is_valid(raise_exception=True)
-        serializer.save()
+        serializer.save(is_active=True)
+
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
 
 
 class ProductDetailAPIView(APIView):
@@ -641,40 +657,37 @@ class ProductDetailAPIView(APIView):
         return [IsAdminUser()]
 
     def get(self, request, pk):
-        product = get_object_or_404(
-            Product.objects.select_related("category", "subcategory").filter(is_active=True),
-            pk=pk
-        )
+        queryset = Product.objects.select_related("brand", "category", "subcategory")
+
+        if not (request.user.is_authenticated and request.user.is_staff):
+            queryset = queryset.filter(is_active=True)
+
+        product = get_object_or_404(queryset, pk=pk)
         serializer = ProductSerializer(product)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     def put(self, request, pk):
         product = get_object_or_404(Product, pk=pk)
-        serializer = ProductSerializer(product, data=request.data, partial=True)
 
+        data = request.data.copy()
+        data.pop("is_active", None)
+
+        serializer = ProductSerializer(product, data=data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
+
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     def delete(self, request, pk):
         product = get_object_or_404(Product, pk=pk)
-        try:
-            product.delete()
-            return Response(status=status.HTTP_204_NO_CONTENT)
-        except ProtectedError:
-            return Response(
-                {
-                    "error": "Cannot delete this product because it is linked to existing customer requests or other protected records."
-                },
-                status=status.HTTP_409_CONFLICT,
-            )
-        except Exception:
-            logger.exception("Product delete failed", extra={"product_id": pk})
-            return Response(
-                {"error": "Failed to delete product."},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
 
+        if not product.is_active:
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        product.is_active = False
+        product.save(update_fields=["is_active"])
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 class ProductImageAPIView(PaginatedAPIView):
     parser_classes = [MultiPartParser, FormParser]

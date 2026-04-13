@@ -12,17 +12,12 @@ def update_inventory_on_closed_request(sender, instance, **kwargs):
     """
     if instance.status == CustomerRequest.STATUS_CLOSED and not instance.stock_deducted:
         try:
-            # We use select_for_update() to prevent race conditions during the stock decrement
             inventory = Inventory.objects.select_for_update().get(product=instance.product)
             
             if inventory.stock >= instance.quantity:
                 inventory.stock -= instance.quantity
                 inventory.save()
-                
-                # Mark as deducted to avoid double-decrement if the record is saved again
-                # Using update_fields to avoid re-triggering signal recursively or overwriting other changes
                 CustomerRequest.objects.filter(pk=instance.pk).update(stock_deducted=True)
-                
                 logger.info(f"Inventory updated for {instance.product.name}: -{instance.quantity} units.")
             else:
                 logger.warning(
