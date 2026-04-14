@@ -118,8 +118,10 @@ def safe_send_mail(subject, message, recipient_list):
 
 
 class StandardPagination(PageNumberPagination):
+    page_size = 20
     page_size_query_param = "page_size"
     max_page_size = 100
+
 
 
 class PaginatedAPIView(APIView):
@@ -128,8 +130,14 @@ class PaginatedAPIView(APIView):
     def paginate(self, request, queryset, serializer_class):
         paginator = self.pagination_class()
         page = paginator.paginate_queryset(queryset, request, view=self)
-        serializer = serializer_class(page, many=True, context={"request": request})
-        return paginator.get_paginated_response(serializer.data)
+
+        if page is not None:
+            serializer = serializer_class(page, many=True, context={"request": request})
+            return paginator.get_paginated_response(serializer.data)
+
+        serializer = serializer_class(queryset, many=True, context={"request": request})
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
 
 
 class BrandAPIView(PaginatedAPIView):
@@ -743,14 +751,24 @@ class ProductSpecificationAPIView(PaginatedAPIView):
 
     def get(self, request, pk=None):
         if pk:
-            spec = get_object_or_404(ProductSpecification.objects.select_related("product"), pk=pk)
+            spec = get_object_or_404(
+                ProductSpecification.objects.select_related("product"),
+                pk=pk,
+            )
             serializer = ProductSpecificationSerializer(spec)
             return Response(serializer.data, status=status.HTTP_200_OK)
 
-        queryset = ProductSpecification.objects.select_related("product").all()
+        queryset = ProductSpecification.objects.select_related("product").order_by(
+            "product_id",
+            "section",
+            "key",
+            "id",
+        )
+
         product_id = request.query_params.get("product")
         if product_id:
             queryset = queryset.filter(product_id=product_id)
+
         return self.paginate(request, queryset, ProductSpecificationSerializer)
 
     def post(self, request):
@@ -761,7 +779,7 @@ class ProductSpecificationAPIView(PaginatedAPIView):
 
     def put(self, request, pk):
         spec = get_object_or_404(ProductSpecification, pk=pk)
-        serializer = ProductSpecificationSerializer(spec, data=request.data)
+        serializer = ProductSpecificationSerializer(spec, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data, status=status.HTTP_200_OK)
@@ -777,6 +795,7 @@ class ProductSpecificationAPIView(PaginatedAPIView):
                 {"error": "Failed to delete specification."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
 
 
 class InventoryAPIView(PaginatedAPIView):
