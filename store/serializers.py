@@ -122,6 +122,7 @@ class ProductImageSerializer(serializers.ModelSerializer):
         return value
 
 
+
 class ProductSpecificationSerializer(serializers.ModelSerializer):
     class Meta:
         model = ProductSpecification
@@ -299,8 +300,8 @@ class PasswordResetRequestSerializer(serializers.Serializer):
 
 
 class PasswordResetConfirmSerializer(serializers.Serializer):
-    uid = serializers.CharField()
-    token = serializers.CharField()
+    email = serializers.EmailField()
+    otp = serializers.CharField(max_length=6)
     new_password = serializers.CharField(write_only=True, min_length=8)
 
     def validate_new_password(self, value):
