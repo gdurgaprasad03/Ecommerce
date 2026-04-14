@@ -94,6 +94,14 @@ def build_reset_link(uid, token):
     return f"{base_url}/reset-password?uid={uid}&token={token}"
 
 
+def build_reset_text(otp):
+    return (
+        "Use the following OTP to reset your password:\n\n"
+        f"OTP: {otp}\n\n"
+        "Submit it with your email and new password to the password reset confirmation endpoint."
+    )
+
+
 def safe_send_mail(subject, message, recipient_list):
     from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "")
 
@@ -441,6 +449,8 @@ class LoginAPIView(APIView):
         )
 
 
+
+
 class PasswordResetRequestAPIView(APIView):
     permission_classes = [AllowAny]
     throttle_classes = [AnonRateThrottle, ScopedRateThrottle]
@@ -454,20 +464,28 @@ class PasswordResetRequestAPIView(APIView):
         user = User.objects.filter(email__iexact=email).first()
 
         if user:
-            uid = urlsafe_base64_encode(force_bytes(user.pk))
-            token = default_token_generator.make_token(user)
-            reset_link = build_reset_link(uid, token)
+            otp_verification, _ = OTPVerification.objects.get_or_create(user=user)
+            otp_verification.otp = generate_otp()
+            otp_verification.attempts = 0
+            otp_verification.expires_at = timezone.now() + timedelta(minutes=OTP_EXPIRY_MINUTES)
+            otp_verification.last_sent_at = timezone.now()
+            otp_verification.is_verified = False
+            otp_verification.verified_at = None
+            otp_verification.save()
 
             safe_send_mail(
-                "Password Reset Request",
-                f"Click the link below to reset your password:\n{reset_link}",
+                "Password Reset OTP",
+                build_reset_text(otp_verification.otp),
                 [email],
             )
 
         return Response(
-            {"message": "If an account with that email exists, a password reset link has been sent."},
+            {
+                "message": "If an account with that email exists, password reset details have been sent."
+            },
             status=status.HTTP_200_OK,
         )
+
 
 
 class PasswordResetConfirmAPIView(APIView):
@@ -479,21 +497,35 @@ class PasswordResetConfirmAPIView(APIView):
         serializer = PasswordResetConfirmSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        uidb64 = serializer.validated_data["uid"]
-        token = serializer.validated_data["token"]
+        email = serializer.validated_data["email"].strip().lower()
+        otp = serializer.validated_data["otp"]
         new_password = serializer.validated_data["new_password"]
 
-        try:
-            uid = force_str(urlsafe_base64_decode(uidb64))
-            user = User.objects.get(pk=uid)
-        except (TypeError, ValueError, OverflowError, User.DoesNotExist):
-            return Response({"error": "Invalid token or user."}, status=status.HTTP_400_BAD_REQUEST)
+        user = User.objects.filter(email__iexact=email).first()
+        if not user:
+            return Response({"error": "Invalid email or OTP."}, status=status.HTTP_400_BAD_REQUEST)
 
-        if not default_token_generator.check_token(user, token):
-            return Response({"error": "Invalid token or user."}, status=status.HTTP_400_BAD_REQUEST)
+        otp_verification = OTPVerification.objects.filter(user=user).first()
+        if not otp_verification:
+            return Response({"error": "Invalid email or OTP."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if otp_verification.is_expired():
+            return Response({"error": "OTP has expired. Please request a new password reset."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if otp_verification.attempts >= OTP_MAX_ATTEMPTS:
+            return Response({"error": "Maximum OTP attempts exceeded. Please request a new password reset."}, status=status.HTTP_429_TOO_MANY_REQUESTS)
+
+        if otp_verification.otp != otp:
+            otp_verification.attempts += 1
+            otp_verification.save(update_fields=["attempts"])
+            return Response({"error": "Invalid email or OTP."}, status=status.HTTP_400_BAD_REQUEST)
 
         user.set_password(new_password)
         user.save(update_fields=["password"])
+
+        otp_verification.is_verified = True
+        otp_verification.verified_at = timezone.now()
+        otp_verification.save(update_fields=["is_verified", "verified_at"])
 
         return Response({"message": "Password reset successful."}, status=status.HTTP_200_OK)
 
@@ -795,7 +827,6 @@ class ProductSpecificationAPIView(PaginatedAPIView):
                 {"error": "Failed to delete specification."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
-
 
 
 class InventoryAPIView(PaginatedAPIView):
