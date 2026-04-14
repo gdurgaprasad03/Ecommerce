@@ -97,19 +97,28 @@ class ProductSerializer(serializers.ModelSerializer):
 
 
 class ProductImageSerializer(serializers.ModelSerializer):
+    image_url = serializers.SerializerMethodField()
+
     class Meta:
         model = ProductImage
-        fields = ["id", "product", "image", "created_at"]
-        read_only_fields = ["created_at"]
+        fields = ["id", "product", "image", "image_url", "created_at"]
+        read_only_fields = ["created_at", "image_url"]
 
+    def get_image_url(self, obj):
+        if obj.image:
+            return obj.image.url
+        return None
 
     def validate_image(self, value):
         max_size = 5 * 1024 * 1024
         content_type = getattr(value, "content_type", "")
+
         if content_type and not content_type.startswith("image/"):
             raise serializers.ValidationError("Only image uploads are allowed.")
+
         if value.size > max_size:
             raise serializers.ValidationError("Image size must be 5MB or less.")
+
         return value
 
 
