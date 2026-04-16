@@ -275,7 +275,15 @@ class CustomerRegistrationSerializer(serializers.ModelSerializer):
 
 class OTPVerifySerializer(serializers.Serializer):
     email = serializers.EmailField()
-    otp = serializers.CharField(min_length=6, max_length=6)
+    otp = serializers.CharField(min_length=6, max_length=6, required=False, allow_blank=True)
+    code = serializers.CharField(min_length=6, max_length=6, required=False, allow_blank=True)
+
+    def validate(self, attrs):
+        otp = attrs.get("otp") or attrs.get("code")
+        if not otp:
+            raise serializers.ValidationError({"otp": "OTP is required."})
+        attrs["otp"] = otp
+        return attrs
 
 
 class OTPResendSerializer(serializers.Serializer):
@@ -301,8 +309,16 @@ class PasswordResetRequestSerializer(serializers.Serializer):
 
 class PasswordResetConfirmSerializer(serializers.Serializer):
     email = serializers.EmailField()
-    otp = serializers.CharField(max_length=6)
+    otp = serializers.CharField(max_length=6, required=False, allow_blank=True)
+    code = serializers.CharField(max_length=6, required=False, allow_blank=True)
     new_password = serializers.CharField(write_only=True, min_length=8)
+
+    def validate(self, attrs):
+        otp = attrs.get("otp") or attrs.get("code")
+        if not otp:
+            raise serializers.ValidationError({"otp": "OTP is required."})
+        attrs["otp"] = otp
+        return attrs
 
     def validate_new_password(self, value):
         validate_password(value)
@@ -325,6 +341,22 @@ class EnquirySerializer(serializers.ModelSerializer):
             "created_at",
         ]
         read_only_fields = ["created_at"]
+        extra_kwargs = {
+            "name": {"required": True, "allow_blank": False},
+            "company_name": {"required": True, "allow_blank": False},
+            "company_address": {"required": True, "allow_blank": False},
+            "quantity": {"required": True},
+            "phone": {"required": True, "allow_blank": False},
+            "email": {"required": True, "allow_blank": False},
+            "product": {"required": False, "allow_null": True},
+            "description": {"required": False, "allow_blank": True},
+        }
+
+    def validate_name(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Name is required.")
+        return value
 
     def validate_phone(self, value):
         normalized = "".join(ch for ch in value if ch.isdigit())

@@ -17,7 +17,7 @@ from django.utils.encoding import force_bytes, force_str
 from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 from rest_framework import status
 from rest_framework.pagination import PageNumberPagination
-from rest_framework.parsers import FormParser, MultiPartParser
+from rest_framework.parsers import JSONParser, FormParser, MultiPartParser
 from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle, ScopedRateThrottle
@@ -103,26 +103,32 @@ def build_reset_text(otp):
 
 
 def safe_send_mail(subject, message, recipient_list):
-    from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "")
+    from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "") or getattr(settings, "EMAIL_HOST_USER", "")
 
     if not from_email:
-        logger.warning("Email skipped because DEFAULT_FROM_EMAIL is empty")
-        return
+        logger.warning("Email skipped because DEFAULT_FROM_EMAIL and EMAIL_HOST_USER are both empty")
+        return False
 
     if not recipient_list or not all(recipient_list):
         logger.warning("Email skipped because recipient list is invalid")
-        return
+        return False
 
     try:
-        send_mail(
+        result = send_mail(
             subject=subject,
             message=message,
             from_email=from_email,
             recipient_list=recipient_list,
             fail_silently=False,
         )
+        if result:
+            logger.info("Email sent successfully", extra={"recipients": recipient_list, "subject": subject})
+            return True
+        logger.warning("Email backend sent zero messages", extra={"recipients": recipient_list, "subject": subject})
+        return False
     except Exception:
         logger.exception("Email sending failed", extra={"recipients": recipient_list, "subject": subject})
+        return False
 
 
 class StandardPagination(PageNumberPagination):
@@ -299,7 +305,12 @@ class VerifyOTPAPIView(APIView):
 
     def post(self, request):
         serializer = OTPVerifySerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            logger.warning(
+                "OTP verify validation failed",
+                extra={"errors": serializer.errors, "data": request.data},
+            )
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         email = serializer.validated_data["email"].strip().lower()
         otp = serializer.validated_data["otp"]
@@ -398,11 +409,13 @@ class ResendOTPAPIView(APIView):
         otp_verification.is_verified = False
         otp_verification.save()
 
-        safe_send_mail(
+        sent = safe_send_mail(
             "Your New OTP for Registration",
             f"Your OTP is {otp}. It expires in {OTP_EXPIRY_MINUTES} minutes.",
             [email],
         )
+        if not sent:
+            logger.warning("Resend OTP email failed to send", extra={"email": email})
 
         return Response(
             {"message": "A new OTP has been sent to your email."},
@@ -473,11 +486,13 @@ class PasswordResetRequestAPIView(APIView):
             otp_verification.verified_at = None
             otp_verification.save()
 
-            safe_send_mail(
+            sent = safe_send_mail(
                 "Password Reset OTP",
                 build_reset_text(otp_verification.otp),
                 [email],
             )
+            if not sent:
+                logger.warning("Password reset email failed to send", extra={"email": email})
 
         return Response(
             {
@@ -495,7 +510,12 @@ class PasswordResetConfirmAPIView(APIView):
 
     def post(self, request):
         serializer = PasswordResetConfirmSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            logger.warning(
+                "Password reset confirmation validation failed",
+                extra={"errors": serializer.errors, "data": request.data},
+            )
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         email = serializer.validated_data["email"].strip().lower()
         otp = serializer.validated_data["otp"]
