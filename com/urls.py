@@ -27,3 +27,5 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include('store.urls')),  
 ]
+static_urlpatterns = static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+urlpatterns += static_urlpatterns       
