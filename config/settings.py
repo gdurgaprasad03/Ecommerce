@@ -29,11 +29,15 @@ ALLOWED_HOSTS = [
 if DEBUG and not ALLOWED_HOSTS:
     ALLOWED_HOSTS = ["*"]
 
+# Respect upstream proxy headers for absolute URL generation behind Nginx.
+USE_X_FORWARDED_HOST = True
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
 CORS_ALLOWED_ORIGINS = [
     origin.strip()
     for origin in os.getenv(
         "CORS_ALLOWED_ORIGINS",
-        "http://127.0.0.1:5173,http://localhost:5173,http://192.168.0.113:5173,https://ecomb2bapplication.onrender.com"
+        "http://127.0.0.1:5173,http://localhost:5173,http://192.168.0.113:5173,https://ecomb2bapplication.onrender.com,https://sales.nxsys.in"
     ).split(",")
     if origin.strip()
 ]
