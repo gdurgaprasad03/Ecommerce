@@ -1,0 +1,20 @@
+Welcome {{ user_name }}!
+
+Thank you for joining our e-commerce platform. We're thrilled to have you on board!
+
+Here's what you can now do:
+- Browse and search for thousands of products
+- Add products to your wishlist
+- Leave reviews and ratings on products you've purchased
+- Receive notifications about products you're interested in
+- Track your orders and manage your profile
+
+Start browsing: {{ frontend_url }}/products
+
+If you have any questions or need assistance, feel free to reach out to our support team.
+
+Happy shopping!
+The E-Commerce Team
+
+---
+This is an automated email. Please do not reply directly to this email.

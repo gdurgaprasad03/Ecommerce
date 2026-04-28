@@ -1,0 +1,18 @@
+New Review for {{ product_name }}
+
+{{ reviewer_name }} just left a review for {{ product_name }}!
+
+Title: {{ title }}
+Rating: {{ rating }} stars
+
+{{ comment }}
+
+Are you interested in this product? Check out what others are saying and make an informed decision.
+
+Read More Reviews: {{ product_url }}
+
+Best regards,
+The E-Commerce Team
+
+---
+You received this email because you have this item in your wishlist.

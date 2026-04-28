@@ -1,0 +1,26 @@
+<h2>Don't Forget Your Wishlist! {{ user_name }}</h2>
+
+<p>Hi {{ user_name }},</p>
+
+<p>You have <strong>{{ product_count }} items</strong> in your wishlist. Here are a few items you might be interested in:</p>
+
+{% for product in products %}
+<div style="background-color: #f9f9f9; padding: 15px; margin: 15px 0; border-left: 4px solid #007bff; border-radius: 3px;">
+    <h4 style="margin: 0 0 10px 0;">{{ product.name }}</h4>
+    <p style="margin: 5px 0; color: #666;">
+        Rating: <span style="color: #ffc107;">★{{ product.rating }}</span>
+    </p>
+</div>
+{% endfor %}
+
+<p>Ready to shop? Check out all your wishlist items now!</p>
+
+<p><a href="{{ wishlist_url }}" style="background-color: #28a745; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: bold;">View Your Wishlist</a></p>
+
+<p>New items are being added every day. Keep checking back for more great products!</p>
+
+<p>Best regards,<br>The E-Commerce Team</p>
+
+<p style="font-size: 12px; color: #666; margin-top: 30px;">
+    <a href="{{ frontend_url }}/settings/notifications">Manage your email preferences</a>
+</p>
