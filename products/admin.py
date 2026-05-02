@@ -23,10 +23,7 @@ class ProductSpecificationInline(admin.TabularInline):
 
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
-    list_display = (
-        "id", "name", "brand", "category", "featured",
-        "top_selling", "new_arrival", "created_at",
-    )
+    list_display = ("id", "name", "brand", "category", "featured", "top_selling", "new_arrival", "created_at")
     list_filter = ("category", "featured", "top_selling", "new_arrival", "created_at")
     search_fields = ("name", "brand__name", "description", "highlights")
     inlines = [ProductImageInline, ProductSpecificationInline]

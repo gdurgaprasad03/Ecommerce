@@ -1,20 +1,23 @@
 import logging
-from django.shortcuts import get_object_or_404
-from django.db.models.deletion import ProtectedError
+
 from django.db.models import Q
+from django.db.models.deletion import ProtectedError
+from django.shortcuts import get_object_or_404
 from rest_framework import status
+from rest_framework.pagination import PageNumberPagination
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import AllowAny, IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework.parsers import MultiPartParser, FormParser
-from rest_framework.pagination import PageNumberPagination
 
-from .models import Category, Brand, Product, ProductImage, ProductSpecification
-from .serializers import (
-    BrandSerializer, CategorySerializer, CategoryWriteSerializer, CategoryReadSerializer,
-    ProductSerializer, ProductImageSerializer, ProductSpecificationSerializer
-)
 from core.pagination.views import PaginatedAPIView
+from .models import Brand, Category, Product, ProductImage, ProductSpecification
+from .serializers import (
+    BrandSerializer, CategoryReadSerializer, CategorySerializer,
+    CategoryWriteSerializer, ProductImageSerializer, ProductSerializer,
+    ProductSpecificationSerializer
+)
+from .services import BulkProductUploadService
 
 logger = logging.getLogger(__name__)
 
@@ -67,11 +70,14 @@ class CategoryAPIView(PaginatedAPIView):
         return [IsAdminUser()]
 
     def get(self, request):
-        is_tree = request.query_params.get("tree", "true").lower() == "true"
+        is_tree = request.query_params.get("tree", "false").lower() == "true"
         base_queryset = Category.objects.filter(is_active=True)
         queryset = base_queryset.filter(parent__isnull=True) if is_tree else base_queryset
         queryset = queryset.prefetch_related("subcategories")
-        return self.paginate(request, queryset, CategorySerializer)
+        
+        from .serializers import CategorySimpleSerializer
+        serializer_class = CategorySerializer if is_tree else CategorySimpleSerializer
+        return self.paginate(request, queryset, serializer_class)
 
     def post(self, request):
         serializer = CategoryWriteSerializer(data=request.data)
@@ -79,7 +85,7 @@ class CategoryAPIView(PaginatedAPIView):
         serializer.save()
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
-class CategoryDetailAPIView(APIView):
+class  CategoryDetailAPIView(APIView):
     def get_permissions(self):
         if self.request.method in ["GET", "OPTIONS"]:
             return [AllowAny()]
@@ -105,7 +111,7 @@ class CategoryDetailAPIView(APIView):
         except ProtectedError:
             return Response({"error": "Cannot delete this category because it is linked to existing products or subcategories."}, status=status.HTTP_409_CONFLICT)
 
-class SubCategoryAPIView(APIView):
+class   SubCategoryAPIView(APIView):
     def get_permissions(self):
         if self.request.method in ["GET", "OPTIONS"]:
             return [AllowAny()]
@@ -126,6 +132,8 @@ class SubCategoryAPIView(APIView):
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 class ProductAPIView(PaginatedAPIView):
+    parser_classes = [MultiPartParser, FormParser]
+
     def get_permissions(self):
         if self.request.method in ["GET", "OPTIONS"]:
             return [AllowAny()]
@@ -134,22 +142,18 @@ class ProductAPIView(PaginatedAPIView):
     def get(self, request):
         include_inactive = request.user.is_authenticated and request.user.is_staff and request.query_params.get("include_inactive", "").lower() == "true"
         queryset = Product.objects.select_related("brand", "category", "subcategory")
-
         if not include_inactive:
             queryset = queryset.filter(is_active=True)
-
         top_selling = request.query_params.get("top_selling")
         featured = request.query_params.get("featured")
         new_arrival = request.query_params.get("new_arrival")
         category_id = request.query_params.get("category")
         subcategory_id = request.query_params.get("subcategory")
-
         if top_selling and top_selling.lower() == "true": queryset = queryset.filter(top_selling=True)
         if featured and featured.lower() == "true": queryset = queryset.filter(featured=True)
         if new_arrival and new_arrival.lower() == "true": queryset = queryset.filter(new_arrival=True)
         if category_id: queryset = queryset.filter(category_id=category_id)
         if subcategory_id: queryset = queryset.filter(subcategory_id=subcategory_id)
-
         return self.paginate(request, queryset, ProductSerializer)
 
     def post(self, request):
@@ -161,6 +165,8 @@ class ProductAPIView(PaginatedAPIView):
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 class ProductDetailAPIView(APIView):
+    parser_classes = [MultiPartParser, FormParser]
+
     def get_permissions(self):
         if self.request.method in ["GET", "OPTIONS"]:
             return [AllowAny()]
@@ -176,40 +182,56 @@ class ProductDetailAPIView(APIView):
 
     def put(self, request, pk):
         product = get_object_or_404(Product, pk=pk)
-        data = request.data.copy()
-        data.pop("is_active", None)
-        serializer = ProductSerializer(product, data=data, partial=True)
+        serializer = ProductSerializer(product, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     def delete(self, request, pk):
         product = get_object_or_404(Product, pk=pk)
-        if not product.is_active: return Response(status=status.HTTP_204_NO_CONTENT)
-        product.is_active = False
-        product.save(update_fields=["is_active"])
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        try:
+            product.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        except ProtectedError:
+            return Response(
+                {"error": "Cannot delete this product permanently because it is linked to existing orders. Please set it to Inactive instead."},
+                status=status.HTTP_409_CONFLICT
+            )
 
 class ProductListAPIView(APIView):
     def get(self, request):
-        queryset = Product.objects.filter(is_active=True).select_related("brand", "category")
         search_query = request.query_params.get("search", "").strip()
         if search_query:
-            queryset = queryset.filter(Q(name__icontains=search_query) | Q(description__icontains=search_query) | Q(highlights__icontains=search_query))
+            from .documents import ProductDocument
+            from elasticsearch_dsl.query import MultiMatch
+            query = MultiMatch(query=search_query, fields=['name^3', 'description', 'highlights'], fuzziness='AUTO')
+            search = ProductDocument.search().query(query).filter('term', is_active=True)
+            queryset = search.to_queryset().select_related("brand", "category")
+        else:
+            queryset = Product.objects.filter(is_active=True).select_related("brand", "category")
+        category_ids = []
+        brand_ids = []
+        subcategory_ids = []
         
-        category_id = request.query_params.get("category")
-        if category_id: queryset = queryset.filter(category_id=category_id)
-        brand_id = request.query_params.get("brand")
-        if brand_id: queryset = queryset.filter(brand_id=brand_id)
+        for key in request.query_params:
+            values = request.query_params.getlist(key)
+            if 'categories' in key or key == 'category':
+                category_ids.extend(values)
+            elif 'brands' in key or key == 'brand':
+                brand_ids.extend(values)
+            elif 'subcategories' in key or key == 'subcategory':
+                subcategory_ids.extend(values)
+        
+        if category_ids: queryset = queryset.filter(category_id__in=list(set(category_ids)))
+        if brand_ids: queryset = queryset.filter(brand_id__in=list(set(brand_ids)))
+        if subcategory_ids: queryset = queryset.filter(subcategory_id__in=list(set(subcategory_ids)))
         
         sort_by = request.query_params.get("sort", "-created_at")
         valid_sorts = ["-created_at", "created_at", "-rating", "rating", "name", "-name"]
         if sort_by in valid_sorts: queryset = queryset.order_by(sort_by)
-        
         if request.query_params.get("featured", "").lower() == "true": queryset = queryset.filter(featured=True)
         if request.query_params.get("new_arrivals", "").lower() == "true": queryset = queryset.filter(new_arrival=True)
         if request.query_params.get("top_selling", "").lower() == "true": queryset = queryset.filter(top_selling=True)
-        
         paginator = PageNumberPagination()
         paginator.page_size = int(request.query_params.get("page_size", 10))
         page = paginator.paginate_queryset(queryset, request)
@@ -296,3 +318,31 @@ class ProductSpecificationAPIView(PaginatedAPIView):
         spec = get_object_or_404(ProductSpecification, pk=pk)
         spec.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+class BulkProductUploadAPIView(APIView):
+    parser_classes = [MultiPartParser, FormParser]
+    permission_classes = [IsAdminUser]
+    
+    def post(self, request):
+        if 'excel_file' not in request.FILES:
+            return Response(
+                {'error': 'No Excel file provided'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        excel_file = request.FILES['excel_file']
+        uploaded_images = {}
+        for image_file in request.FILES.getlist('images'):
+            uploaded_images[image_file.name] = image_file
+        try:
+            service = BulkProductUploadService(excel_file, uploaded_images)
+            result = service.upload()
+            if result['success']:
+                return Response(result, status=status.HTTP_201_CREATED)
+            else:
+                return Response(result, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            logger.error(f"Bulk upload error: {str(e)}")
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )

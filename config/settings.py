@@ -10,37 +10,54 @@ load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.getenv(
-    "DJANGO_SECRET_KEY",
-    "dev-only-insecure-secret-key-with-at-least-32-characters-12345"
-)
+SECRET_KEY = os.getenv("DJANGO_SECRET_KEY")
+if not SECRET_KEY or SECRET_KEY == "REPLACE_WITH_STRONG_SECRET_KEY_50_CHARS_MIN":
+    if not os.getenv("DJANGO_DEBUG", "False").lower() in ["true", "1"]:
+        raise ImproperlyConfigured(
+            "DJANGO_SECRET_KEY must be set to a secure random string in production. "
+            "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(50))\""
+        )
+    SECRET_KEY = "dev-only-insecure-secret-key-do-not-use-in-production"
 
-DEBUG = os.getenv("DJANGO_DEBUG", "True").lower() in ["true", "1"]
+DEBUG = os.getenv("DJANGO_DEBUG", "False").lower() in ["true", "1"]
 
-ALLOWED_HOSTS = [
-    host.strip()
-    for host in os.getenv(
-        "DJANGO_ALLOWED_HOSTS",
-        "127.0.0.1,localhost,192.168.0.113"
-    ).split(",")
-    if host.strip()
-]
+if DEBUG:
+    ALLOWED_HOSTS = ["127.0.0.1", "localhost"]
+else:
+    ALLOWED_HOSTS = [
+        host.strip()
+        for host in os.getenv("DJANGO_ALLOWED_HOSTS", "yourdomain.com").split(",")
+        if host.strip()
+    ]
 
-if DEBUG and not ALLOWED_HOSTS:
-    ALLOWED_HOSTS = ["*"]
+if DEBUG:
+    CSRF_TRUSTED_ORIGINS = [
+        "http://127.0.0.1:3000",
+        "http://localhost:3000",
+    ]
+else:
+    CSRF_TRUSTED_ORIGINS = [
+        origin.strip()
+        for origin in os.getenv("CSRF_TRUSTED_ORIGINS", "https://yourdomain.com").split(",")
+        if origin.strip()
+    ]
 
-# Respect upstream proxy headers for absolute URL generation behind Nginx.
 USE_X_FORWARDED_HOST = True
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
-CORS_ALLOWED_ORIGINS = [
-    origin.strip()
-    for origin in os.getenv(
-        "CORS_ALLOWED_ORIGINS",
-        "http://127.0.0.1:5173,http://localhost:5173,http://192.168.0.113:5173,https://ecomb2bapplication.onrender.com,https://sales.nxsys.in"
-    ).split(",")
-    if origin.strip()
-]
+if DEBUG:
+    CORS_ALLOWED_ORIGINS = [
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:5173",
+        "http://localhost:3000",
+        "http://localhost:5173",
+    ]
+else:
+    CORS_ALLOWED_ORIGINS = [
+        origin.strip()
+        for origin in os.getenv("CORS_ALLOWED_ORIGINS", "https://yourdomain.com").split(",")
+        if origin.strip()
+    ]
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -141,11 +158,11 @@ REST_FRAMEWORK = {
         "rest_framework.throttling.ScopedRateThrottle",
     ],
     "DEFAULT_THROTTLE_RATES": {
-        "anon": "1000/hour",
-        "user": "5000/hour",
-        "login": "20/min",
-        "otp": "10/min",
-        "password_reset": "10/min",
+        "anon": "100/hour",
+        "user": "500/hour",
+        "login": "5/min",
+        "otp": "5/min",
+        "password_reset": "5/min",
     },
 }
 
@@ -293,13 +310,75 @@ else:
 ANALYTICS_CACHE_TIMEOUT = int(os.getenv("ANALYTICS_CACHE_TIMEOUT", "3600"))  # 1 hour
 ENABLE_ANALYTICS = os.getenv("ENABLE_ANALYTICS", "True").lower() in ["true", "1"]
 
+# Security Headers
+SECURE_BROWSER_XSS_FILTER = True
+SECURE_CONTENT_TYPE_NOSNIFF = True
+X_FRAME_OPTIONS = "DENY"
+CSRF_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_HTTPONLY = True
+CSRF_COOKIE_SAMESITE = "Strict"
+SESSION_COOKIE_SECURE = not DEBUG
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = "Lax"
+
 if not DEBUG:
-    SECURE_BROWSER_XSS_FILTER = True
-    SECURE_CONTENT_TYPE_NOSNIFF = True
-    X_FRAME_OPTIONS = "DENY"
-    SECURE_SSL_REDIRECT = os.getenv("SECURE_SSL_REDIRECT", "True").lower() in ["true", "1"]
-    SESSION_COOKIE_SECURE = True
-    CSRF_COOKIE_SECURE = True
-    SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", "31536000"))
+    SECURE_SSL_REDIRECT = True
+    SECURE_HSTS_SECONDS = 31536000  # 1 year
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
+else:
+    SECURE_SSL_REDIRECT = False
+    SECURE_HSTS_SECONDS = 0
+
+# Logging Configuration
+import logging.config
+
+LOGS_DIR = BASE_DIR / "logs"
+LOGS_DIR.mkdir(exist_ok=True)
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "{levelname} {asctime} {module} {process:d} {thread:d} {message}",
+            "style": "{",
+        },
+        "simple": {
+            "format": "{levelname} {asctime} {message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "simple",
+        },
+        "file": {
+            "level": "WARNING",
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": LOGS_DIR / "django.log",
+            "maxBytes": 1024 * 1024 * 10,  # 10MB
+            "backupCount": 5,
+            "formatter": "verbose",
+        },
+    },
+    "root": {
+        "handlers": ["console", "file"] if not DEBUG else ["console"],
+        "level": "INFO",
+    },
+    "loggers": {
+        "django": {
+            "handlers": ["console", "file"] if not DEBUG else ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "core.tasks": {
+            "handlers": ["console", "file"] if not DEBUG else ["console"],
+            "level": "DEBUG",
+            "propagate": False,
+        },
+    },
+}
+
+logging.config.dictConfig(LOGGING)

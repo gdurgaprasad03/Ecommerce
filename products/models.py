@@ -24,7 +24,6 @@ class Category(models.Model):
     def __str__(self):
         return self.name
 
-
 class Brand(models.Model):
     name = models.CharField(max_length=200, unique=True)
     logo = models.ImageField(upload_to="brands/", null=True, blank=True)
@@ -37,7 +36,6 @@ class Brand(models.Model):
 
     def __str__(self):
         return self.name
-
 
 class Product(models.Model):
     brand = models.ForeignKey(Brand, on_delete=models.PROTECT, related_name="products", null=True, blank=True)
@@ -53,6 +51,7 @@ class Product(models.Model):
     mpn = models.CharField(max_length=100, null=True, blank=True)
     sku = models.CharField(max_length=100, null=True, blank=True)
     description = models.TextField()
+    product_image = models.ImageField(upload_to="products/", null=True, blank=True)
     highlights = models.TextField(null=True, blank=True)
     rating = models.FloatField(default=0, validators=[MinValueValidator(0), MaxValueValidator(5)])
     featured = models.BooleanField(default=False)
@@ -68,7 +67,6 @@ class Product(models.Model):
     def __str__(self):
         return self.name
 
-
 class ProductImage(models.Model):
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="images")
     image = models.ImageField(upload_to="products/")
@@ -79,7 +77,6 @@ class ProductImage(models.Model):
 
     def __str__(self):
         return f"{self.product.name} Image"
-
 
 class ProductSpecification(models.Model):
     product = models.ForeignKey(
@@ -102,3 +99,4 @@ class ProductSpecification(models.Model):
 
     def __str__(self):
         return f"{self.product.name} - {self.section} - {self.key}"
+  

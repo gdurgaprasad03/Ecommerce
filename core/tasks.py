@@ -373,3 +373,144 @@ def clean_expired_otps():
     except Exception as exc:
         logger.error(f"Error cleaning expired OTPs: {str(exc)}")
         return f"Error: {str(exc)}"
+
+
+# ==================== Customer Request & Enquiry Email Tasks ====================
+
+@shared_task(bind=True, max_retries=3)
+def send_customer_request_email(self, request_id):
+    """Send customer request notification emails"""
+    try:
+        from orders.models import CustomerRequest
+        
+        customer_request = CustomerRequest.objects.select_related('product').get(id=request_id)
+        product_name = customer_request.product.name if customer_request.product else "N/A"
+        
+        # Send notification to admin
+        admin_message = (
+            f"New customer inquiry received.\n\n"
+            f"Customer Name: {customer_request.name}\n"
+            f"Email: {customer_request.email}\n"
+            f"Phone: {customer_request.phone}\n"
+            f"Product: {product_name}\n"
+            f"Quantity: {customer_request.quantity}\n"
+            f"Description:\n{customer_request.description}"
+        )
+        
+        admin_email = getattr(settings, "SALES_NOTIFICATION_EMAIL", "")
+        if admin_email:
+            try:
+                from django.core.mail import send_mail
+                send_mail(
+                    f"New Product Request - {product_name}",
+                    admin_message,
+                    settings.DEFAULT_FROM_EMAIL,
+                    [admin_email],
+                    fail_silently=False,
+                )
+                logger.info(f"Admin notification sent for customer request {request_id}")
+            except Exception as e:
+                logger.error(f"Failed to send admin notification: {str(e)}", exc_info=True)
+        
+        # Send confirmation to customer
+        customer_message = (
+            f"Dear {customer_request.name},\n\n"
+            f"Thank you for reaching out to us.\n"
+            f"We have successfully received your quote request for {product_name}.\n\n"
+            f"Our team will contact you soon with the pricing and further details.\n\n"
+            f"Best regards,\n"
+            f"Your Company Team"
+        )
+        
+        try:
+            from django.core.mail import send_mail
+            send_mail(
+                "We received your quote request",
+                customer_message,
+                settings.DEFAULT_FROM_EMAIL,
+                [customer_request.email],
+                fail_silently=False,
+            )
+            logger.info(f"Customer confirmation sent for request {request_id}")
+        except Exception as e:
+            logger.error(f"Failed to send customer confirmation: {str(e)}", exc_info=True)
+        
+        return f"Emails sent for customer request {request_id}"
+        
+    except CustomerRequest.DoesNotExist:
+        logger.error(f"Customer request {request_id} not found")
+        return f"Customer request {request_id} not found"
+    except Exception as exc:
+        logger.error(f"Error sending customer request emails: {str(exc)}", exc_info=True)
+        raise self.retry(exc=exc, countdown=60)
+
+
+@shared_task(bind=True, max_retries=3)
+def send_enquiry_email(self, enquiry_id):
+    """Send enquiry notification emails"""
+    try:
+        from orders.models import Enquiry
+        
+        enquiry = Enquiry.objects.select_related('product').get(id=enquiry_id)
+        product_name = enquiry.product.name if enquiry.product else "General Enquiry"
+        
+        # Send notification to admin
+        admin_message = (
+            f"New enquiry received.\n\n"
+            f"Name: {enquiry.name}\n"
+            f"Company Name: {enquiry.company_name}\n"
+            f"Company Address: {enquiry.company_address}\n"
+            f"Email: {enquiry.email}\n"
+            f"Phone: {enquiry.phone}\n"
+            f"Product: {product_name}\n"
+            f"Quantity: {enquiry.quantity}\n"
+            f"Description:\n{enquiry.description}"
+        )
+        
+        admin_email = getattr(settings, "SALES_NOTIFICATION_EMAIL", "")
+        if admin_email:
+            try:
+                from django.core.mail import send_mail
+                send_mail(
+                    f"New Enquiry - {product_name}",
+                    admin_message,
+                    settings.DEFAULT_FROM_EMAIL,
+                    [admin_email],
+                    fail_silently=False,
+                )
+                logger.info(f"Admin notification sent for enquiry {enquiry_id}")
+            except Exception as e:
+                logger.error(f"Failed to send admin notification: {str(e)}", exc_info=True)
+        
+        # Send confirmation to customer
+        customer_message = (
+            f"Dear {enquiry.name},\n\n"
+            f"Thank you for contacting us.\n"
+            f"We have received your enquiry and our team will get in touch with you shortly.\n\n"
+            f"Product: {product_name}\n"
+            f"Quantity: {enquiry.quantity}\n\n"
+            f"Best regards,\n"
+            f"Your Company Team"
+        )
+        
+        try:
+            from django.core.mail import send_mail
+            send_mail(
+                "Thank you for your enquiry",
+                customer_message,
+                settings.DEFAULT_FROM_EMAIL,
+                [enquiry.email],
+                fail_silently=False,
+            )
+            logger.info(f"Customer confirmation sent for enquiry {enquiry_id}")
+        except Exception as e:
+            logger.error(f"Failed to send customer confirmation: {str(e)}", exc_info=True)
+        
+        return f"Emails sent for enquiry {enquiry_id}"
+        
+    except Enquiry.DoesNotExist:
+        logger.error(f"Enquiry {enquiry_id} not found")
+        return f"Enquiry {enquiry_id} not found"
+    except Exception as exc:
+        logger.error(f"Error sending enquiry emails: {str(exc)}", exc_info=True)
+        raise self.retry(exc=exc, countdown=60)

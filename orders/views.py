@@ -4,13 +4,13 @@ from rest_framework.permissions import AllowAny, IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from django.conf import settings
+from django.db import IntegrityError
 import logging
-from threading import Thread
 
 from .models import CustomerRequest, Enquiry
 from .serializers import CustomerRequestSerializer, CustomerRequestStatusSerializer, EnquirySerializer
 from core.pagination.views import PaginatedAPIView
-from core.utils.helpers import safe_send_mail
+from core.tasks import send_customer_request_email, send_enquiry_email
 
 logger = logging.getLogger(__name__)
 
@@ -27,25 +27,23 @@ class CustomerRequestAPIView(PaginatedAPIView):
     def post(self, request):
         serializer = CustomerRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        request_obj = serializer.save()
-
-        def send_email_safe(obj):
-            try:
-                product_name = obj.product.name if obj.product else "N/A"
-                safe_send_mail(
-                    f"New Product Request - {product_name}",
-                    (f"New customer inquiry received.\n\nCustomer Name: {obj.name}\nEmail: {obj.email}\nPhone: {obj.phone}\nProduct: {product_name}\nQuantity: {obj.quantity}\nDescription:\n{obj.description}"),
-                    [getattr(settings, "SALES_NOTIFICATION_EMAIL", "")]
-                )
-                safe_send_mail(
-                    "We received your quote request",
-                    (f"Dear {obj.name},\n\nThank you for reaching out to us.\nWe have successfully received your quote request for {product_name}.\n\nOur team will contact you soon with the pricing and further details.\n\nBest regards,\nYour Company Team"),
-                    [obj.email]
-                )
-            except Exception:
-                logger.exception("Email failed", extra={"request_id": obj.id})
-
-        Thread(target=send_email_safe, args=(request_obj,), daemon=True).start()
+        
+        try:
+            request_obj = serializer.save()
+            # Send emails asynchronously using Celery
+            send_customer_request_email.delay(request_obj.id)
+        except IntegrityError as e:
+            logger.error(f"Database error creating customer request: {str(e)}", exc_info=True)
+            return Response(
+                {"error": "Failed to create request due to duplicate entry"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error creating customer request: {str(e)}", exc_info=True)
+            return Response(
+                {"error": "An unexpected error occurred"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
         return Response({"status": True, "message": "Request submitted successfully."}, status=status.HTTP_201_CREATED)
 
@@ -70,24 +68,22 @@ class EnquiryAPIView(PaginatedAPIView):
     def post(self, request):
         serializer = EnquirySerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        enquiry = serializer.save()
-
-        def send_email_safe(obj):
-            try:
-                product_name = obj.product.name if obj.product else "General Enquiry"
-                safe_send_mail(
-                    f"New Enquiry - {product_name}",
-                    (f"New enquiry received.\n\nName: {obj.name}\nCompany Name: {obj.company_name}\nCompany Address: {obj.company_address}\nEmail: {obj.email}\nPhone: {obj.phone}\nProduct: {product_name}\nQuantity: {obj.quantity}\nDescription:\n{obj.description}"),
-                    [getattr(settings, "SALES_NOTIFICATION_EMAIL", "")]
-                )
-                safe_send_mail(
-                    "Thank you for your enquiry",
-                    (f"Dear {obj.name},\n\nThank you for contacting us.\nWe have received your enquiry and our team will get in touch with you shortly.\n\nProduct: {product_name}\nQuantity: {obj.quantity}\n\nBest regards,\nYour Company Team"),
-                    [obj.email]
-                )
-            except Exception:
-                logger.exception("Enquiry email failed", extra={"enquiry_id": obj.id})
-
-        Thread(target=send_email_safe, args=(enquiry,), daemon=True).start()
+        
+        try:
+            enquiry = serializer.save()
+            # Send emails asynchronously using Celery
+            send_enquiry_email.delay(enquiry.id)
+        except IntegrityError as e:
+            logger.error(f"Database error creating enquiry: {str(e)}", exc_info=True)
+            return Response(
+                {"error": "Failed to create enquiry due to duplicate entry"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error creating enquiry: {str(e)}", exc_info=True)
+            return Response(
+                {"error": "An unexpected error occurred"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
         return Response({"status": True, "message": "Enquiry submitted successfully."}, status=status.HTTP_201_CREATED)

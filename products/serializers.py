@@ -7,7 +7,6 @@ class BrandSerializer(serializers.ModelSerializer):
         fields = ["id", "name", "logo", "is_active", "created_at", "updated_at"]
         read_only_fields = ["created_at", "updated_at"]
 
-
 class CategoryReadSerializer(serializers.ModelSerializer):
     subcategories = serializers.SerializerMethodField()
 
@@ -26,12 +25,10 @@ class CategoryReadSerializer(serializers.ModelSerializer):
             context={"depth": depth + 1},
         ).data
 
-
 class CategoryWriteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Category
         fields = ["id", "name", "parent", "navbar_group"]
-
 
 class CategorySerializer(serializers.ModelSerializer):
     subcategories = CategoryReadSerializer(many=True, read_only=True)
@@ -40,6 +37,10 @@ class CategorySerializer(serializers.ModelSerializer):
         model = Category
         fields = ["id", "name", "parent", "navbar_group", "subcategories"]
 
+class CategorySimpleSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Category
+        fields = ["id", "name", "parent", "navbar_group", "is_active"]
 
 class ProductSerializer(serializers.ModelSerializer):
     brand_name = serializers.ReadOnlyField(source="brand.name")
@@ -50,7 +51,7 @@ class ProductSerializer(serializers.ModelSerializer):
         model = Product
         fields = [
             "id", "category", "category_name", "subcategory", "subcategory_name",
-            "name", "brand", "brand_name", "mpn", "sku", "description",
+            "name", "product_image", "brand", "brand_name", "mpn", "sku", "description",
             "highlights", "rating", "featured", "top_selling", "new_arrival",
             "is_active", "created_at", "updated_at",
         ]
@@ -59,6 +60,12 @@ class ProductSerializer(serializers.ModelSerializer):
             "is_active", "created_at", "updated_at",
         ]
 
+    def to_internal_value(self, data):
+        data = data.copy()
+        for field in ["category", "subcategory", "brand"]:
+            if field in data and isinstance(data[field], dict) and "id" in data[field]:
+                data[field] = data[field]["id"]
+        return super().to_internal_value(data)
 
 class ProductImageSerializer(serializers.ModelSerializer):
     image_url = serializers.SerializerMethodField()
@@ -81,7 +88,6 @@ class ProductImageSerializer(serializers.ModelSerializer):
         if value.size > max_size:
             raise serializers.ValidationError("Image size must be 5MB or less.")
         return value
-
 
 class ProductSpecificationSerializer(serializers.ModelSerializer):
     class Meta:
@@ -156,7 +162,6 @@ class CachedProductSerializer(ProductSerializer):
                 inventory = None
         return inventory
 
-
 class CachedCategorySerializer(CategoryReadSerializer):
     def to_representation(self, instance):
         from core.cache_utils import CacheManager
@@ -167,7 +172,6 @@ class CachedCategorySerializer(CategoryReadSerializer):
         data = super().to_representation(instance)
         CacheManager.set_cache(cache_key, data, timeout=7200)
         return data
-
 
 class CachedBrandSerializer(BrandSerializer):
     def to_representation(self, instance):
