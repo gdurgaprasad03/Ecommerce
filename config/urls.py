@@ -11,12 +11,11 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('accounts/', include('accounts.urls')),
     path('products/', include('products.urls')),
-    path('inventory/', include('inventory.urls')),
+    path('inventory/', include('inventory.urls')), 
     path('orders/', include('orders.urls')),
     path('reviews/', include('reviews.urls')),
     path('wishlist/', include('wishlist.urls')),
     path('analytics/', include('analytics.urls')),
-    path('search/', include('search.urls')),
 ]
 static_urlpatterns = static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 urlpatterns += static_urlpatterns       

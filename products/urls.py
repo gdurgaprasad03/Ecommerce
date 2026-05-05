@@ -3,7 +3,8 @@ from .views import (
     CategoryAPIView, CategoryDetailAPIView, SubCategoryAPIView,
     BrandAPIView, BrandDetailAPIView, ProductAPIView, ProductDetailAPIView,
     ProductImageAPIView, ProductSpecificationAPIView, ProductListAPIView,
-    SimilarProductsAPIView, BulkProductUploadAPIView
+    SimilarProductsAPIView, BulkProductUploadAPIView, AutocompleteAPIView,
+    SearchFacetsAPIView
 )
 
 urlpatterns = [
@@ -15,6 +16,8 @@ urlpatterns = [
     path("products/", ProductAPIView.as_view(), name="product-list-create"),
     path("products/<int:pk>/", ProductDetailAPIView.as_view(), name="product-detail"),
     path("products/search/", ProductListAPIView.as_view(), name="product-search"),
+    path("products/autocomplete/", AutocompleteAPIView.as_view(), name="product-autocomplete"),
+    path("products/facets/", SearchFacetsAPIView.as_view(), name="product-facets"),
     path("products/<int:product_id>/similar/", SimilarProductsAPIView.as_view(), name="similar-products"),
     path("products/bulk/upload/", BulkProductUploadAPIView.as_view(), name="bulk-product-upload"),
     path("images/", ProductImageAPIView.as_view(), name="image-list-create"),

@@ -4,9 +4,24 @@ import os
 import sys
 
 
+def suppress_socketserver_timeouts():
+    """Suppress harmless TimeoutError logs from development server."""
+    import socketserver
+    original_handle_error = socketserver.BaseServer.handle_error
+    def custom_handle_error(self, request, client_address):
+        if sys.exc_info()[0] is TimeoutError:
+            return
+        original_handle_error(self, request, client_address)
+    socketserver.BaseServer.handle_error = custom_handle_error
+
+
 def main():
     """Run administrative tasks."""
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
+    
+    if 'runserver' in sys.argv:
+        suppress_socketserver_timeouts()
+
     try:
         from django.core.management import execute_from_command_line
     except ImportError as exc:

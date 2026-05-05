@@ -211,8 +211,49 @@ class AnalyticsManager:
         return data
     
     @staticmethod
+    def get_dashboard_summary():
+        from products.models import Category, Product
+        from inventory.models import Inventory
+        from orders.models import CustomerRequest
+        
+        low_stock_threshold = 10
+        
+        return {
+            "counts": {
+                "total_categories": Category.objects.filter(is_active=True).count(),
+                "total_products": Product.objects.filter(is_active=True).count(),
+                "total_inventory_items": Inventory.objects.count(),
+                "total_requests": CustomerRequest.objects.count(),
+                "pending_requests": CustomerRequest.objects.filter(status=CustomerRequest.STATUS_PENDING).count(),
+            },
+            "alerts": {
+                "low_stock_products": [
+                    {"id": i.product.id, "name": i.product.name, "stock": i.stock} 
+                    for i in Inventory.objects.select_related("product").filter(stock__lte=low_stock_threshold)[:5]
+                ],
+            },
+            "performance": {
+                "top_selling": [
+                    {"id": p.id, "name": p.name, "rating": p.rating}
+                    for p in Product.objects.filter(is_active=True, top_selling=True)[:5]
+                ],
+                "top_rated": [
+                    {"id": p.id, "name": p.name, "rating": p.rating}
+                    for p in Product.objects.filter(is_active=True, rating__gte=4.0).order_by("-rating")[:5]
+                ],
+            },
+            "recent": {
+                "requests": [
+                    {"id": r.id, "name": r.name, "product": r.product.name if r.product else None, "status": r.status} 
+                    for r in CustomerRequest.objects.select_related("product").order_by("-created_at")[:5]
+                ]
+            }
+        }
+
+    @staticmethod
     def get_all_analytics():
         return {
+            "summary": AnalyticsManager.get_dashboard_summary(),
             "sales": AnalyticsManager.get_sales_metrics(),
             "customers": AnalyticsManager.get_customer_metrics(),
             "reviews": AnalyticsManager.get_review_metrics(),

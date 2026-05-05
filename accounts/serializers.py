@@ -1,11 +1,14 @@
 from django.contrib.auth.models import User
-from django.contrib.auth.password_validation import validate_password
+from django.contrib.auth.password_validation import validate_password as django_validate_password
 from django.utils.html import escape
 from rest_framework import serializers
 import re
+from core.utils.serializers import SanitizedModelSerializer
+from .validators import validate_password_complexity
 
-class CustomerRegistrationSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True, min_length=12, max_length=128)
+class CustomerRegistrationSerializer(SanitizedModelSerializer):
+    password = serializers.CharField(write_only=True, min_length=8, max_length=128)
+    confirm_password = serializers.CharField(write_only=True, required=True)
     username = serializers.CharField(required=False, allow_blank=True, max_length=150)
     email = serializers.EmailField(required=True)
     company_name = serializers.CharField(required=True, max_length=255)
@@ -18,6 +21,7 @@ class CustomerRegistrationSerializer(serializers.ModelSerializer):
             "username",
             "email",
             "password",
+            "confirm_password",
             "first_name",
             "last_name",
             "company_name",
@@ -40,17 +44,15 @@ class CustomerRegistrationSerializer(serializers.ModelSerializer):
         return value
 
     def validate_password(self, value):
-        """Validate password complexity"""
-        if len(value) < 12:
-            raise serializers.ValidationError("Password must be at least 12 characters")
-        if not any(c.isupper() for c in value):
-            raise serializers.ValidationError("Password must contain uppercase letters")
-        if not any(c.isdigit() for c in value):
-            raise serializers.ValidationError("Password must contain numbers")
-        if not any(c in '!@#$%^&*()_+-=[]{}|;:,.<>?' for c in value):
-            raise serializers.ValidationError("Password must contain special characters")
-        
-        validate_password(value)
+        """Validate password complexity using custom and Django validators"""
+        try:
+            validate_password_complexity(value)
+            django_validate_password(value)
+        except Exception as e:
+            # Re-raise as DRF ValidationError with clean messages
+            if hasattr(e, 'messages'):
+                raise serializers.ValidationError(e.messages)
+            raise serializers.ValidationError(str(e))
         return value
 
     def validate_company_name(self, value):
@@ -64,6 +66,11 @@ class CustomerRegistrationSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         email = attrs["email"].strip().lower()
         username = attrs.get("username", "").strip() or email
+        password = attrs.get("password")
+        confirm_password = attrs.get("confirm_password")
+
+        if password != confirm_password:
+            raise serializers.ValidationError({"confirm_password": "Passwords do not match."})
 
         existing_user = User.objects.filter(email__iexact=email).first()
         if existing_user and existing_user.is_active:
@@ -77,6 +84,9 @@ class CustomerRegistrationSerializer(serializers.ModelSerializer):
         attrs["username"] = username
         attrs["company_name"] = attrs["company_name"].strip()
         attrs["company_address"] = attrs["company_address"].strip()
+
+        # Remove confirm_password as it's not a field in User model
+        attrs.pop("confirm_password", None)
 
         return attrs
 
@@ -128,7 +138,8 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
     email = serializers.EmailField()
     otp = serializers.CharField(max_length=6, required=False, allow_blank=True)
     code = serializers.CharField(max_length=6, required=False, allow_blank=True)
-    new_password = serializers.CharField(write_only=True, min_length=12, max_length=128)
+    new_password = serializers.CharField(write_only=True, min_length=8, max_length=128)
+    confirm_password = serializers.CharField(write_only=True, required=True)
 
     def validate(self, attrs):
         otp = attrs.get("otp") or attrs.get("code")
@@ -138,19 +149,19 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
         if not otp.isdigit():
             raise serializers.ValidationError({"otp": "OTP must contain only digits."})
         
+        if attrs.get("new_password") != attrs.get("confirm_password"):
+            raise serializers.ValidationError({"confirm_password": "Passwords do not match."})
+            
         attrs["otp"] = otp
         return attrs
 
     def validate_new_password(self, value):
-        """Validate new password complexity"""
-        if len(value) < 12:
-            raise serializers.ValidationError("Password must be at least 12 characters")
-        if not any(c.isupper() for c in value):
-            raise serializers.ValidationError("Password must contain uppercase letters")
-        if not any(c.isdigit() for c in value):
-            raise serializers.ValidationError("Password must contain numbers")
-        if not any(c in '!@#$%^&*()_+-=[]{}|;:,.<>?' for c in value):
-            raise serializers.ValidationError("Password must contain special characters")
-        
-        validate_password(value)
+        """Validate new password complexity using custom and Django validators"""
+        try:
+            validate_password_complexity(value)
+            django_validate_password(value)
+        except Exception as e:
+            if hasattr(e, 'messages'):
+                raise serializers.ValidationError(e.messages)
+            raise serializers.ValidationError(str(e))
         return value

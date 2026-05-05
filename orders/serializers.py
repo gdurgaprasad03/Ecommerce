@@ -1,7 +1,8 @@
 from rest_framework import serializers
+from core.utils.serializers import SanitizedModelSerializer
 from .models import CustomerRequest, Enquiry
 
-class CustomerRequestSerializer(serializers.ModelSerializer):
+class CustomerRequestSerializer(SanitizedModelSerializer):
     class Meta:
         model = CustomerRequest
         fields = [
@@ -27,7 +28,7 @@ class CustomerRequestStatusSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Invalid status value.")
         return value
 
-class EnquirySerializer(serializers.ModelSerializer):
+class EnquirySerializer(SanitizedModelSerializer):
     class Meta:
         model = Enquiry
         fields = [

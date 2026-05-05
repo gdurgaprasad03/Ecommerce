@@ -18,6 +18,7 @@ from .serializers import (
     ProductSpecificationSerializer
 )
 from .services import BulkProductUploadService
+from search.search import ElasticsearchSearchManager
 
 logger = logging.getLogger(__name__)
 
@@ -199,44 +200,73 @@ class ProductDetailAPIView(APIView):
             )
 
 class ProductListAPIView(APIView):
+    permission_classes = [AllowAny]
+
     def get(self, request):
         search_query = request.query_params.get("search", "").strip()
-        if search_query:
-            from .documents import ProductDocument
-            from elasticsearch_dsl.query import MultiMatch
-            query = MultiMatch(query=search_query, fields=['name^3', 'description', 'highlights'], fuzziness='AUTO')
-            search = ProductDocument.search().query(query).filter('term', is_active=True)
-            queryset = search.to_queryset().select_related("brand", "category")
+        
+        # Prepare search parameters
+        search_params = {
+            'category_id': request.query_params.get('category'),
+            'subcategory_id': request.query_params.get('subcategory'),
+            'brand_id': request.query_params.get('brand'),
+            'featured': request.query_params.get('featured', '').lower() == 'true',
+            'top_selling': request.query_params.get('top_selling', '').lower() == 'true',
+            'new_arrival': request.query_params.get('new_arrival', '').lower() == 'true',
+            'min_rating': request.query_params.get('min_rating'),
+            'sort': request.query_params.get('sort', '-created_at'),
+            'page': request.query_params.get('page', 1),
+            'page_size': request.query_params.get('page_size', 20),
+            'is_active': True
+        }
+
+        # Use ElasticsearchSearchManager
+        search_result = ElasticsearchSearchManager.search(search_query, **search_params)
+
+        if search_result:
+            product_ids = search_result['ids']
+            # Fetch products from DB in the order returned by ES
+            preserved_order = {id: pos for pos, id in enumerate(product_ids)}
+            queryset = Product.objects.filter(id__in=product_ids).select_related("brand", "category")
+            
+            # Sort the queryset based on the order from ES
+            products = sorted(queryset, key=lambda x: preserved_order.get(str(x.id)))
+            
+            serializer = ProductSerializer(products, many=True, context={'request': request})
+            
+            return Response({
+                'count': search_result['total'],
+                'results': serializer.data,
+                'took': search_result['took'],
+                'page': int(search_params['page']),
+                'page_size': int(search_params['page_size'])
+            })
         else:
+            # Fallback to database search if ES fails
             queryset = Product.objects.filter(is_active=True).select_related("brand", "category")
-        category_ids = []
-        brand_ids = []
-        subcategory_ids = []
-        
-        for key in request.query_params:
-            values = request.query_params.getlist(key)
-            if 'categories' in key or key == 'category':
-                category_ids.extend(values)
-            elif 'brands' in key or key == 'brand':
-                brand_ids.extend(values)
-            elif 'subcategories' in key or key == 'subcategory':
-                subcategory_ids.extend(values)
-        
-        if category_ids: queryset = queryset.filter(category_id__in=list(set(category_ids)))
-        if brand_ids: queryset = queryset.filter(brand_id__in=list(set(brand_ids)))
-        if subcategory_ids: queryset = queryset.filter(subcategory_id__in=list(set(subcategory_ids)))
-        
-        sort_by = request.query_params.get("sort", "-created_at")
-        valid_sorts = ["-created_at", "created_at", "-rating", "rating", "name", "-name"]
-        if sort_by in valid_sorts: queryset = queryset.order_by(sort_by)
-        if request.query_params.get("featured", "").lower() == "true": queryset = queryset.filter(featured=True)
-        if request.query_params.get("new_arrivals", "").lower() == "true": queryset = queryset.filter(new_arrival=True)
-        if request.query_params.get("top_selling", "").lower() == "true": queryset = queryset.filter(top_selling=True)
-        paginator = PageNumberPagination()
-        paginator.page_size = int(request.query_params.get("page_size", 10))
-        page = paginator.paginate_queryset(queryset, request)
-        serializer = ProductSerializer(page, many=True)
-        return paginator.get_paginated_response(serializer.data)
+            if search_query:
+                queryset = queryset.filter(Q(name__icontains=search_query) | Q(description__icontains=search_query))
+            
+            paginator = PageNumberPagination()
+            paginator.page_size = int(search_params['page_size'])
+            page = paginator.paginate_queryset(queryset, request)
+            serializer = ProductSerializer(page, many=True, context={'request': request})
+            return paginator.get_paginated_response(serializer.data)
+
+class AutocompleteAPIView(APIView):
+    permission_classes = [AllowAny]
+    
+    def get(self, request):
+        prefix = request.query_params.get('prefix', '')
+        suggestions = ElasticsearchSearchManager.autocomplete(prefix)
+        return Response({'suggestions': suggestions})
+
+class SearchFacetsAPIView(APIView):
+    permission_classes = [AllowAny]
+    
+    def get(self, request):
+        facets = ElasticsearchSearchManager.get_facets()
+        return Response(facets)
 
 class SimilarProductsAPIView(APIView):
     def get(self, request, product_id):

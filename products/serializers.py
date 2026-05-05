@@ -1,13 +1,18 @@
 from rest_framework import serializers
+from rest_framework.validators import UniqueTogetherValidator
+from core.utils.serializers import SanitizedModelSerializer, validate_image_file
 from .models import Brand, Category, Product, ProductImage, ProductSpecification
 
-class BrandSerializer(serializers.ModelSerializer):
+class BrandSerializer(SanitizedModelSerializer):
     class Meta:
         model = Brand
         fields = ["id", "name", "logo", "is_active", "created_at", "updated_at"]
         read_only_fields = ["created_at", "updated_at"]
 
-class CategoryReadSerializer(serializers.ModelSerializer):
+    def validate_logo(self, value):
+        return validate_image_file(value)
+
+class CategoryReadSerializer(SanitizedModelSerializer):
     subcategories = serializers.SerializerMethodField()
 
     class Meta:
@@ -25,7 +30,7 @@ class CategoryReadSerializer(serializers.ModelSerializer):
             context={"depth": depth + 1},
         ).data
 
-class CategoryWriteSerializer(serializers.ModelSerializer):
+class CategoryWriteSerializer(SanitizedModelSerializer):
     class Meta:
         model = Category
         fields = ["id", "name", "parent", "navbar_group"]
@@ -42,7 +47,7 @@ class CategorySimpleSerializer(serializers.ModelSerializer):
         model = Category
         fields = ["id", "name", "parent", "navbar_group", "is_active"]
 
-class ProductSerializer(serializers.ModelSerializer):
+class ProductSerializer(SanitizedModelSerializer):
     brand_name = serializers.ReadOnlyField(source="brand.name")
     category_name = serializers.ReadOnlyField(source="category.name")
     subcategory_name = serializers.ReadOnlyField(source="subcategory.name")
@@ -60,6 +65,9 @@ class ProductSerializer(serializers.ModelSerializer):
             "is_active", "created_at", "updated_at",
         ]
 
+    def validate_product_image(self, value):
+        return validate_image_file(value)
+
     def to_internal_value(self, data):
         data = data.copy()
         for field in ["category", "subcategory", "brand"]:
@@ -67,7 +75,7 @@ class ProductSerializer(serializers.ModelSerializer):
                 data[field] = data[field]["id"]
         return super().to_internal_value(data)
 
-class ProductImageSerializer(serializers.ModelSerializer):
+class ProductImageSerializer(SanitizedModelSerializer):
     image_url = serializers.SerializerMethodField()
 
     class Meta:
@@ -81,18 +89,19 @@ class ProductImageSerializer(serializers.ModelSerializer):
         return None
 
     def validate_image(self, value):
-        max_size = 5 * 1024 * 1024
-        content_type = getattr(value, "content_type", "")
-        if content_type and not content_type.startswith("image/"):
-            raise serializers.ValidationError("Only image uploads are allowed.")
-        if value.size > max_size:
-            raise serializers.ValidationError("Image size must be 5MB or less.")
-        return value
+        return validate_image_file(value)
 
-class ProductSpecificationSerializer(serializers.ModelSerializer):
+class ProductSpecificationSerializer(SanitizedModelSerializer):
     class Meta:
         model = ProductSpecification
         fields = ["id", "product", "section", "key", "value"]
+        validators = [
+            UniqueTogetherValidator(
+                queryset=ProductSpecification.objects.all(),
+                fields=['product', 'section', 'key'],
+                message="This specification key already exists for this section of the product."
+            )
+        ]
 
     def validate_section(self, value):
         value = value.strip()

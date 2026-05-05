@@ -1,7 +1,8 @@
 from rest_framework import serializers
+from core.utils.serializers import SanitizedModelSerializer
 from .models import ProductReview
 
-class ProductReviewSerializer(serializers.ModelSerializer):
+class ProductReviewSerializer(SanitizedModelSerializer):
     username = serializers.CharField(source="user.username", read_only=True)
     user_id = serializers.PrimaryKeyRelatedField(source="user", read_only=True)
 

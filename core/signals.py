@@ -1,4 +1,6 @@
+from django.db import transaction
 from django.db.models.signals import post_save, post_delete
+
 from django.dispatch import receiver
 from django.contrib.auth.models import User
 from orders.models import CustomerRequest
@@ -18,18 +20,19 @@ def update_inventory_on_closed_request(sender, instance, **kwargs):
     """
     if instance.status == CustomerRequest.STATUS_CLOSED and not instance.stock_deducted:
         try:
-            inventory = Inventory.objects.select_for_update().get(product=instance.product)
+            with transaction.atomic():
+                inventory = Inventory.objects.select_for_update().get(product=instance.product)
 
-            if inventory.stock >= instance.quantity:
-                inventory.stock -= instance.quantity
-                inventory.save()
-                CustomerRequest.objects.filter(pk=instance.pk).update(stock_deducted=True)
-                logger.info(f"Inventory updated for {instance.product.name}: -{instance.quantity} units.")
-            else:
-                logger.warning(
-                    f"Insufficient stock for {instance.product.name}. "
-                    f"Available: {inventory.stock}, Requested: {instance.quantity}"
-                )
+                if inventory.stock >= instance.quantity:
+                    inventory.stock -= instance.quantity
+                    inventory.save()
+                    CustomerRequest.objects.filter(pk=instance.pk).update(stock_deducted=True)
+                    logger.info(f"Inventory updated for {instance.product.name}: -{instance.quantity} units.")
+                else:
+                    logger.warning(
+                        f"Insufficient stock for {instance.product.name}. "
+                        f"Available: {inventory.stock}, Requested: {instance.quantity}"
+                    )
 
         except Inventory.DoesNotExist:
             logger.error(f"Inventory record missing for product: {instance.product.name}")

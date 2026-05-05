@@ -22,7 +22,7 @@ if not SECRET_KEY or SECRET_KEY == "REPLACE_WITH_STRONG_SECRET_KEY_50_CHARS_MIN"
 DEBUG = os.getenv("DJANGO_DEBUG", "False").lower() in ["true", "1"]
 
 if DEBUG:
-    ALLOWED_HOSTS = ["127.0.0.1", "localhost"]
+    ALLOWED_HOSTS = ["127.0.0.1", "localhost", "192.168.0.113"]
 else:
     ALLOWED_HOSTS = [
         host.strip()
@@ -34,6 +34,8 @@ if DEBUG:
     CSRF_TRUSTED_ORIGINS = [
         "http://127.0.0.1:3000",
         "http://localhost:3000",
+        "http://192.168.0.113:8000",
+        "http://192.168.0.113:5173",
     ]
 else:
     CSRF_TRUSTED_ORIGINS = [
@@ -51,6 +53,8 @@ if DEBUG:
         "http://127.0.0.1:5173",
         "http://localhost:3000",
         "http://localhost:5173",
+        "http://192.168.0.113:3000",
+        "http://192.168.0.113:5173",
     ]
 else:
     CORS_ALLOWED_ORIGINS = [
@@ -138,7 +142,10 @@ DATABASES = {
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
-    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
+    {
+        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
+        "OPTIONS": {"min_length": 8},
+    },
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
@@ -158,11 +165,11 @@ REST_FRAMEWORK = {
         "rest_framework.throttling.ScopedRateThrottle",
     ],
     "DEFAULT_THROTTLE_RATES": {
-        "anon": "100/hour",
-        "user": "500/hour",
-        "login": "5/min",
-        "otp": "5/min",
-        "password_reset": "5/min",
+        "anon": "100/min",
+        "user": "1000/min",
+        "login": "20/min",
+        "otp": "20/min",
+        "password_reset": "20/min",
     },
 }
 

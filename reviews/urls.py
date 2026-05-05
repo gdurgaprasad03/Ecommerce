@@ -6,3 +6,4 @@ urlpatterns = [
     path("reviews/<int:product_id>/", ProductReviewAPIView.as_view(), name="product-reviews"),
     path("reviews/detail/<int:review_id>/", ReviewDetailAPIView.as_view(), name="review-detail"),
 ]
+

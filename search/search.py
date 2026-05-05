@@ -1,4 +1,4 @@
-from django_elasticsearch_dsl import Document, Text, Integer, Keyword, Completion, Float
+from django_elasticsearch_dsl import Document, fields, Text, Integer, Keyword, Completion, Float
 from django_elasticsearch_dsl.registries import registry
 from products.models import Product
 import logging
@@ -17,19 +17,27 @@ class ProductDocument(Document):
     )
     description = Text(analyzer='standard')
     highlights = Text(analyzer='standard')
+    sku = Keyword()
+    mpn = Keyword()
     
-    category_name = Keyword()
-    brand_name = Keyword()
+    category = fields.ObjectField(properties={
+        'id': fields.IntegerField(),
+        'name': fields.TextField(),
+    })
+    subcategory = fields.ObjectField(properties={
+        'id': fields.IntegerField(),
+        'name': fields.TextField(),
+    })
+    brand = fields.ObjectField(properties={
+        'id': fields.IntegerField(),
+        'name': fields.TextField(),
+    })
     
     rating = Float()
-    price_min = Float()
-    price_max = Float()
-    
     featured = Keyword()
     top_selling = Keyword()
     new_arrival = Keyword()
-    
-    in_stock = Keyword()
+    is_active = Keyword()
     
     class Index:
         name = 'products'
@@ -41,13 +49,6 @@ class ProductDocument(Document):
                     'standard': {
                         'type': 'standard',
                         'stopwords': '_english_',
-                    }
-                },
-                'normalizer': {
-                    'lowercase': {
-                        'type': 'custom',
-                        'char_filter': [],
-                        'filter': ['lowercase'],
                     }
                 }
             }
@@ -61,11 +62,14 @@ class ProductDocument(Document):
             'updated_at',
         ]
     
-    def prepare_category_name(self, instance):
-        return instance.category.name if instance.category else ""
-    
-    def prepare_brand_name(self, instance):
-        return instance.brand.name if instance.brand else ""
+    def prepare_category(self, instance):
+        return {'id': instance.category.id, 'name': instance.category.name} if instance.category else None
+
+    def prepare_subcategory(self, instance):
+        return {'id': instance.subcategory.id, 'name': instance.subcategory.name} if instance.subcategory else None
+
+    def prepare_brand(self, instance):
+        return {'id': instance.brand.id, 'name': instance.brand.name} if instance.brand else None
     
     def prepare_featured(self, instance):
         return "yes" if instance.featured else "no"
@@ -76,85 +80,82 @@ class ProductDocument(Document):
     def prepare_new_arrival(self, instance):
         return "yes" if instance.new_arrival else "no"
     
-    def prepare_in_stock(self, instance):
-        try:
-            stock = instance.inventory.stock
-            return "yes" if stock > 0 else "no"
-        except:
-            return "unknown"
+    def prepare_is_active(self, instance):
+        return "yes" if instance.is_active else "no"
 
 
 class ElasticsearchSearchManager:
     @staticmethod
-    def search(query_string, **kwargs):
+    def search(query_string='', **kwargs):
         from elasticsearch_dsl import Q, Search
         try:
             s = Search(index='products')
-            q = Q('multi_match', query=query_string, fields=[
-                'name^3',
-                'description',
-                'highlights',
-            ], fuzziness='AUTO', prefix_length=1)
             
-            s = s.query(q)
+            if query_string:
+                q = Q('multi_match', query=query_string, fields=[
+                    'name^3',
+                    'description',
+                    'highlights',
+                    'sku',
+                    'mpn',
+                ], fuzziness='AUTO', prefix_length=1)
+                s = s.query(q)
+            else:
+                s = s.query('match_all')
             
-            if kwargs.get('category'):
-                s = s.filter('term', category_name=kwargs['category'])
-            if kwargs.get('brand'):
-                s = s.filter('term', brand_name=kwargs['brand'])
-            if kwargs.get('in_stock'):
-                s = s.filter('term', in_stock='yes')
-            if kwargs.get('min_rating'):
-                s = s.filter('range', rating={'gte': kwargs['min_rating']})
+            # Filters
+            if kwargs.get('category_id'):
+                s = s.filter('term', category__id=kwargs['category_id'])
+            if kwargs.get('subcategory_id'):
+                s = s.filter('term', subcategory__id=kwargs['subcategory_id'])
+            if kwargs.get('brand_id'):
+                s = s.filter('term', brand__id=kwargs['brand_id'])
             if kwargs.get('featured'):
                 s = s.filter('term', featured='yes')
+            if kwargs.get('top_selling'):
+                s = s.filter('term', top_selling='yes')
+            if kwargs.get('new_arrival'):
+                s = s.filter('term', new_arrival='yes')
+            if kwargs.get('is_active') is not None:
+                val = "yes" if kwargs['is_active'] else "no"
+                s = s.filter('term', is_active=val)
+            else:
+                s = s.filter('term', is_active='yes')
+                
+            if kwargs.get('min_rating'):
+                s = s.filter('range', rating={'gte': kwargs['min_rating']})
+            
+            # Sorting
+            sort_by = kwargs.get('sort', '-created_at')
+            if sort_by == 'price_low':
+                s = s.sort('price') # Assuming price is indexed
+            elif sort_by == 'price_high':
+                s = s.sort('-price')
+            elif sort_by == 'rating':
+                s = s.sort('-rating')
+            elif sort_by == 'newest':
+                s = s.sort('-created_at')
+            else:
+                s = s.sort('-created_at')
+
+            # Pagination
+            page = int(kwargs.get('page', 1))
+            page_size = int(kwargs.get('page_size', 20))
+            start = (page - 1) * page_size
+            s = s[start:start + page_size]
             
             response = s.execute()
             
-            results = []
-            for hit in response:
-                results.append({
-                    'id': hit.meta.id,
-                    'name': hit.name,
-                    'description': hit.description[:200] if hit.description else '',
-                    'rating': hit.rating,
-                    'score': hit.meta.score,
-                    'category': hit.category_name,
-                    'brand': hit.brand_name,
-                })
-            return results
+            # Return IDs for database hydration
+            product_ids = [hit.meta.id for hit in response]
+            return {
+                'ids': product_ids,
+                'total': response.hits.total.value,
+                'took': response.took,
+            }
         except Exception as e:
-            logger.warning(f"Elasticsearch search failed, falling back to database: {str(e)}")
-            from products.models import Product
-            from django.db.models import Q as DjangoQ
-            
-            queryset = Product.objects.filter(is_active=True)
-            queryset = queryset.filter(
-                DjangoQ(name__icontains=query_string) |
-                DjangoQ(description__icontains=query_string)
-            )
-            
-            if kwargs.get('category'):
-                queryset = queryset.filter(category_id=kwargs['category'])
-            if kwargs.get('brand'):
-                queryset = queryset.filter(brand_id=kwargs['brand'])
-            if kwargs.get('featured'):
-                queryset = queryset.filter(featured=True)
-            if kwargs.get('min_rating'):
-                queryset = queryset.filter(rating__gte=kwargs['min_rating'])
-            
-            results = []
-            for p in queryset[:20]:
-                results.append({
-                    'id': p.id,
-                    'name': p.name,
-                    'description': p.description[:200] if p.description else '',
-                    'rating': p.rating,
-                    'score': 1.0,
-                    'category': p.category.name if p.category else None,
-                    'brand': p.brand.name if p.brand else None,
-                })
-            return results
+            logger.warning(f"Elasticsearch search failed: {str(e)}")
+            return None
     
     @staticmethod
     def autocomplete(prefix, limit=10):
@@ -189,21 +190,20 @@ class ElasticsearchSearchManager:
     def get_facets():
         from elasticsearch_dsl import Search, A
         try:
-            s = Search(index='products')
-            s.aggs.bucket('categories', A('terms', field='category_name', size=100))
-            s.aggs.bucket('brands', A('terms', field='brand_name', size=100))
+            s = Search(index='products').filter('term', is_active='yes')
+            s.aggs.bucket('categories', A('terms', field='category.name.raw', size=100))
+            s.aggs.bucket('brands', A('terms', field='brand.name.raw', size=100))
             s.aggs.bucket('ratings', A('terms', field='rating'))
-            s.aggs.bucket('features', A('terms', field='featured'))
             
             response = s.execute()
             facets = {
                 'categories': [{'name': cat.key, 'count': cat.doc_count} for cat in response.aggregations.categories.buckets],
                 'brands': [{'name': brand.key, 'count': brand.doc_count} for brand in response.aggregations.brands.buckets],
                 'ratings': [{'rating': rating.key, 'count': rating.doc_count} for rating in response.aggregations.ratings.buckets],
-                'features': [{'type': feature.key, 'count': feature.doc_count} for feature in response.aggregations.features.buckets],
             }
             return facets
         except Exception as e:
+            logger.error(f"Faceting error: {str(e)}")
             return {}
     
     @staticmethod
