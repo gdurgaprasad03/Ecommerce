@@ -193,7 +193,7 @@ if not DATABASE_URL:
 DATABASES = {
     "default": dj_database_url.parse(
         DATABASE_URL,
-        conn_max_age=int(os.getenv("DB_CONN_MAX_AGE", "60")),
+        conn_max_age=int(os.getenv("DB_CONN_MAX_AGE", "0")),
         conn_health_checks=os.getenv("DB_CONN_HEALTH_CHECKS", "True").lower() in ["true", "1"],
         ssl_require=os.getenv("DB_SSL_REQUIRE", "True").lower() in ["true", "1"],
     )
