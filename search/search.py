@@ -5,7 +5,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-
 @registry.register_document
 class ProductDocument(Document):
     name = Text(
@@ -19,7 +18,7 @@ class ProductDocument(Document):
     highlights = Text(analyzer='standard')
     sku = Keyword()
     mpn = Keyword()
-    
+
     category = fields.ObjectField(properties={
         'id': fields.IntegerField(),
         'name': fields.TextField(),
@@ -32,13 +31,13 @@ class ProductDocument(Document):
         'id': fields.IntegerField(),
         'name': fields.TextField(),
     })
-    
+
     rating = Float()
     featured = Keyword()
     top_selling = Keyword()
     new_arrival = Keyword()
     is_active = Keyword()
-    
+
     class Index:
         name = 'products'
         settings = {
@@ -53,7 +52,7 @@ class ProductDocument(Document):
                 }
             }
         }
-    
+
     class Django:
         model = Product
         fields = [
@@ -61,7 +60,7 @@ class ProductDocument(Document):
             'created_at',
             'updated_at',
         ]
-    
+
     def prepare_category(self, instance):
         return {'id': instance.category.id, 'name': instance.category.name} if instance.category else None
 
@@ -70,19 +69,18 @@ class ProductDocument(Document):
 
     def prepare_brand(self, instance):
         return {'id': instance.brand.id, 'name': instance.brand.name} if instance.brand else None
-    
+
     def prepare_featured(self, instance):
         return "yes" if instance.featured else "no"
-    
+
     def prepare_top_selling(self, instance):
         return "yes" if instance.top_selling else "no"
-    
+
     def prepare_new_arrival(self, instance):
         return "yes" if instance.new_arrival else "no"
-    
+
     def prepare_is_active(self, instance):
         return "yes" if instance.is_active else "no"
-
 
 class ElasticsearchSearchManager:
     @staticmethod
@@ -90,7 +88,7 @@ class ElasticsearchSearchManager:
         from elasticsearch_dsl import Q, Search
         try:
             s = Search(index='products')
-            
+
             if query_string:
                 q = Q('multi_match', query=query_string, fields=[
                     'name^3',
@@ -102,8 +100,7 @@ class ElasticsearchSearchManager:
                 s = s.query(q)
             else:
                 s = s.query('match_all')
-            
-            # Filters
+
             if kwargs.get('category_id'):
                 s = s.filter('term', category__id=kwargs['category_id'])
             if kwargs.get('subcategory_id'):
@@ -121,14 +118,13 @@ class ElasticsearchSearchManager:
                 s = s.filter('term', is_active=val)
             else:
                 s = s.filter('term', is_active='yes')
-                
+
             if kwargs.get('min_rating'):
                 s = s.filter('range', rating={'gte': kwargs['min_rating']})
-            
-            # Sorting
+
             sort_by = kwargs.get('sort', '-created_at')
             if sort_by == 'price_low':
-                s = s.sort('price') # Assuming price is indexed
+                s = s.sort('price')
             elif sort_by == 'price_high':
                 s = s.sort('-price')
             elif sort_by == 'rating':
@@ -138,15 +134,13 @@ class ElasticsearchSearchManager:
             else:
                 s = s.sort('-created_at')
 
-            # Pagination
             page = int(kwargs.get('page', 1))
             page_size = int(kwargs.get('page_size', 20))
             start = (page - 1) * page_size
             s = s[start:start + page_size]
-            
+
             response = s.execute()
-            
-            # Return IDs for database hydration
+
             product_ids = [hit.meta.id for hit in response]
             return {
                 'ids': product_ids,
@@ -156,7 +150,7 @@ class ElasticsearchSearchManager:
         except Exception as e:
             logger.warning(f"Elasticsearch search failed: {str(e)}")
             return None
-    
+
     @staticmethod
     def autocomplete(prefix, limit=10):
         from elasticsearch_dsl import Search
@@ -167,7 +161,7 @@ class ElasticsearchSearchManager:
                 'size': limit,
                 'skip_duplicates': True,
             })
-            
+
             response = s.execute()
             suggestions = []
             if 'product_suggest' in response.suggest:
@@ -181,11 +175,11 @@ class ElasticsearchSearchManager:
         except Exception as e:
             from products.models import Product
             suggestions = Product.objects.filter(
-                name__istartswith=prefix, 
+                name__istartswith=prefix,
                 is_active=True
             ).values_list('name', flat=True)[:limit]
             return [{'text': s, 'score': 1.0} for s in suggestions]
-    
+
     @staticmethod
     def get_facets():
         from elasticsearch_dsl import Search, A
@@ -194,7 +188,7 @@ class ElasticsearchSearchManager:
             s.aggs.bucket('categories', A('terms', field='category.name.raw', size=100))
             s.aggs.bucket('brands', A('terms', field='brand.name.raw', size=100))
             s.aggs.bucket('ratings', A('terms', field='rating'))
-            
+
             response = s.execute()
             facets = {
                 'categories': [{'name': cat.key, 'count': cat.doc_count} for cat in response.aggregations.categories.buckets],
@@ -205,7 +199,7 @@ class ElasticsearchSearchManager:
         except Exception as e:
             logger.error(f"Faceting error: {str(e)}")
             return {}
-    
+
     @staticmethod
     def index_product(product):
         try:
@@ -215,7 +209,7 @@ class ElasticsearchSearchManager:
             return True
         except Exception as e:
             return False
-    
+
     @staticmethod
     def delete_product_index(product_id):
         try:
@@ -225,7 +219,7 @@ class ElasticsearchSearchManager:
             return True
         except Exception as e:
             return False
-    
+
     @staticmethod
     def reindex_all():
         try:

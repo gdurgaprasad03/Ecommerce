@@ -3,6 +3,7 @@ from rest_framework.validators import UniqueTogetherValidator
 from core.utils.serializers import SanitizedModelSerializer, validate_image_file
 from .models import Brand, Category, Product, ProductImage, ProductSpecification
 
+
 class BrandSerializer(SanitizedModelSerializer):
     class Meta:
         model = Brand
@@ -11,6 +12,7 @@ class BrandSerializer(SanitizedModelSerializer):
 
     def validate_logo(self, value):
         return validate_image_file(value)
+
 
 class CategoryReadSerializer(SanitizedModelSerializer):
     subcategories = serializers.SerializerMethodField()
@@ -30,22 +32,26 @@ class CategoryReadSerializer(SanitizedModelSerializer):
             context={"depth": depth + 1},
         ).data
 
+
 class CategoryWriteSerializer(SanitizedModelSerializer):
     class Meta:
         model = Category
-        fields = ["id", "name", "parent", "navbar_group"]
+        fields = ["id", "name", "parent", "navbar_group", "is_active"]
+
 
 class CategorySerializer(serializers.ModelSerializer):
     subcategories = CategoryReadSerializer(many=True, read_only=True)
 
     class Meta:
         model = Category
-        fields = ["id", "name", "parent", "navbar_group", "subcategories"]
+        fields = ["id", "name", "parent", "navbar_group", "is_active", "subcategories"]
+
 
 class CategorySimpleSerializer(serializers.ModelSerializer):
     class Meta:
         model = Category
         fields = ["id", "name", "parent", "navbar_group", "is_active"]
+
 
 class ProductSerializer(SanitizedModelSerializer):
     brand_name = serializers.ReadOnlyField(source="brand.name")
@@ -56,13 +62,14 @@ class ProductSerializer(SanitizedModelSerializer):
         model = Product
         fields = [
             "id", "category", "category_name", "subcategory", "subcategory_name",
-            "name", "product_image", "brand", "brand_name", "mpn", "sku", "description",
-            "highlights", "rating", "featured", "top_selling", "new_arrival",
-            "is_active", "created_at", "updated_at",
+            "name", "product_image", "brand", "brand_name", "mpn", "sku",
+            "description", "highlights", "rating", "featured", "top_selling",
+            "new_arrival", "is_active", "created_at", "updated_at",
         ]
+        # is_active is now writable. Public read access is filtered at the view layer.
         read_only_fields = [
             "id", "category_name", "subcategory_name", "brand_name",
-            "is_active", "created_at", "updated_at",
+            "created_at", "updated_at",
         ]
 
     def validate_product_image(self, value):
@@ -74,6 +81,7 @@ class ProductSerializer(SanitizedModelSerializer):
             if field in data and isinstance(data[field], dict) and "id" in data[field]:
                 data[field] = data[field]["id"]
         return super().to_internal_value(data)
+
 
 class ProductImageSerializer(SanitizedModelSerializer):
     image_url = serializers.SerializerMethodField()
@@ -91,6 +99,7 @@ class ProductImageSerializer(SanitizedModelSerializer):
     def validate_image(self, value):
         return validate_image_file(value)
 
+
 class ProductSpecificationSerializer(SanitizedModelSerializer):
     class Meta:
         model = ProductSpecification
@@ -98,8 +107,8 @@ class ProductSpecificationSerializer(SanitizedModelSerializer):
         validators = [
             UniqueTogetherValidator(
                 queryset=ProductSpecification.objects.all(),
-                fields=['product', 'section', 'key'],
-                message="This specification key already exists for this section of the product."
+                fields=["product", "section", "key"],
+                message="This specification key already exists for this section of the product.",
             )
         ]
 
@@ -121,15 +130,16 @@ class ProductSpecificationSerializer(SanitizedModelSerializer):
             raise serializers.ValidationError("Value is required.")
         return value
 
+
 class CachedProductSerializer(ProductSerializer):
     images = serializers.SerializerMethodField()
     specifications = serializers.SerializerMethodField()
     reviews = serializers.SerializerMethodField()
     inventory = serializers.SerializerMethodField()
-    
+
     class Meta(ProductSerializer.Meta):
         fields = ProductSerializer.Meta.fields + ["images", "specifications", "reviews", "inventory"]
-    
+
     def get_images(self, obj):
         from core.cache_utils import CacheManager
         cache_key = f"product_images:{obj.id}"
@@ -138,7 +148,7 @@ class CachedProductSerializer(ProductSerializer):
             images = ProductImageSerializer(obj.images.all(), many=True).data
             CacheManager.set_cache(cache_key, images, timeout=3600)
         return images
-    
+
     def get_specifications(self, obj):
         from core.cache_utils import CacheManager
         cache_key = f"product_specs:{obj.id}"
@@ -147,7 +157,7 @@ class CachedProductSerializer(ProductSerializer):
             specs = ProductSpecificationSerializer(obj.specifications.all(), many=True).data
             CacheManager.set_cache(cache_key, specs, timeout=3600)
         return specs
-    
+
     def get_reviews(self, obj):
         from core.cache_utils import CacheManager
         from reviews.serializers import ProductReviewSerializer
@@ -157,7 +167,7 @@ class CachedProductSerializer(ProductSerializer):
             reviews = ProductReviewSerializer(obj.reviews.all()[:5], many=True).data
             CacheManager.set_cache(cache_key, reviews, timeout=1800)
         return reviews
-    
+
     def get_inventory(self, obj):
         from core.cache_utils import CacheManager
         from inventory.serializers import InventorySerializer
@@ -167,9 +177,10 @@ class CachedProductSerializer(ProductSerializer):
             try:
                 inventory = InventorySerializer(obj.inventory).data
                 CacheManager.set_cache(cache_key, inventory, timeout=600)
-            except:
+            except Exception:
                 inventory = None
         return inventory
+
 
 class CachedCategorySerializer(CategoryReadSerializer):
     def to_representation(self, instance):
@@ -181,6 +192,7 @@ class CachedCategorySerializer(CategoryReadSerializer):
         data = super().to_representation(instance)
         CacheManager.set_cache(cache_key, data, timeout=7200)
         return data
+
 
 class CachedBrandSerializer(BrandSerializer):
     def to_representation(self, instance):

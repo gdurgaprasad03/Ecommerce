@@ -27,10 +27,10 @@ class CustomerRequestAPIView(PaginatedAPIView):
     def post(self, request):
         serializer = CustomerRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        
+
         try:
             request_obj = serializer.save()
-            # Send emails asynchronously using Celery
+
             send_customer_request_email.delay(request_obj.id)
         except IntegrityError as e:
             logger.error(f"Database error creating customer request: {str(e)}", exc_info=True)
@@ -54,7 +54,6 @@ class CustomerRequestAPIView(PaginatedAPIView):
         serializer.save()
         return Response({"message": "Status updated successfully.", "status": req.status}, status=status.HTTP_200_OK)
 
-
 class EnquiryAPIView(PaginatedAPIView):
     def get_permissions(self):
         if self.request.method in ["POST", "GET", "OPTIONS"]:
@@ -68,10 +67,10 @@ class EnquiryAPIView(PaginatedAPIView):
     def post(self, request):
         serializer = EnquirySerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        
+
         try:
             enquiry = serializer.save()
-            # Send emails asynchronously using Celery
+
             send_enquiry_email.delay(enquiry.id)
         except IntegrityError as e:
             logger.error(f"Database error creating enquiry: {str(e)}", exc_info=True)

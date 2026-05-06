@@ -6,6 +6,20 @@ from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 import dj_database_url
 
+import socket
+
+def get_local_ip():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
+LOCAL_IP = get_local_ip()
+
 load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -22,7 +36,7 @@ if not SECRET_KEY or SECRET_KEY == "REPLACE_WITH_STRONG_SECRET_KEY_50_CHARS_MIN"
 DEBUG = os.getenv("DJANGO_DEBUG", "False").lower() in ["true", "1"]
 
 if DEBUG:
-    ALLOWED_HOSTS = ["127.0.0.1", "localhost", "192.168.0.113"]
+    ALLOWED_HOSTS = ["127.0.0.1", "localhost", "0.0.0.0", LOCAL_IP, "*"]
 else:
     ALLOWED_HOSTS = [
         host.strip()
@@ -34,8 +48,8 @@ if DEBUG:
     CSRF_TRUSTED_ORIGINS = [
         "http://127.0.0.1:3000",
         "http://localhost:3000",
-        "http://192.168.0.113:8000",
-        "http://192.168.0.113:5173",
+        f"http://{LOCAL_IP}:8000",
+        f"http://{LOCAL_IP}:5173",
     ]
 else:
     CSRF_TRUSTED_ORIGINS = [
@@ -53,8 +67,9 @@ if DEBUG:
         "http://127.0.0.1:5173",
         "http://localhost:3000",
         "http://localhost:5173",
-        "http://192.168.0.113:3000",
-        "http://192.168.0.113:5173",
+        f"http://{LOCAL_IP}:3000",
+        f"http://{LOCAL_IP}:5173",
+        f"http://{LOCAL_IP}:8000",
     ]
 else:
     CORS_ALLOWED_ORIGINS = [
@@ -81,7 +96,6 @@ INSTALLED_APPS = [
     "colorfield",
 ]
 
-# Only include Elasticsearch in production or if explicitly enabled
 if os.getenv("USE_ELASTICSEARCH", "False").lower() in ["true", "1"]:
     INSTALLED_APPS.append("django_elasticsearch_dsl")
 
@@ -219,7 +233,7 @@ EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
 if DEBUG and not EMAIL_HOST_USER:
     EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 else:
-    # Use Celery for async email sending in production
+
     EMAIL_BACKEND = os.getenv(
         "EMAIL_BACKEND",
         "djcelery_email.backends.CeleryEmailBackend" if not DEBUG else "django.core.mail.backends.smtp.EmailBackend"
@@ -233,14 +247,13 @@ EMAIL_TIMEOUT = int(os.getenv("EMAIL_TIMEOUT", "10"))
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", EMAIL_HOST_USER or "test@example.com")
 SALES_NOTIFICATION_EMAIL = os.getenv("SALES_NOTIFICATION_EMAIL", DEFAULT_FROM_EMAIL)
 
-# ==================== Phase 2: Email Configuration ====================
 CELERY_EMAIL_TASK_CONFIG = {
-    'rate_limit': '50/m',  # 50 emails per minute
+    'rate_limit': '50/m',
 }
 EMAIL_RETRY_INTERVAL = int(os.getenv("EMAIL_RETRY_INTERVAL", "60"))
 EMAIL_MAX_RETRIES = int(os.getenv("EMAIL_MAX_RETRIES", "3"))
 
-FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "http://192.168.0.113:5173")
+FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", f"http://{LOCAL_IP}:5173")
 
 OTP_EXPIRY_MINUTES = int(os.getenv("OTP_EXPIRY_MINUTES", "10"))
 OTP_MAX_ATTEMPTS = int(os.getenv("OTP_MAX_ATTEMPTS", "5"))
@@ -262,11 +275,10 @@ CACHES = {
             "IGNORE_EXCEPTIONS": True,
         },
         "KEY_PREFIX": "ecommerce",
-        "TIMEOUT": int(os.getenv("CACHE_TIMEOUT", "3600")),  # 1 hour
+        "TIMEOUT": int(os.getenv("CACHE_TIMEOUT", "3600")),
     }
 }
 
-# ==================== Phase 2: Celery Configuration ====================
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://127.0.0.1:6379/1")
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://127.0.0.1:6379/2")
 CELERY_ACCEPT_CONTENT = ["json"]
@@ -274,29 +286,28 @@ CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = os.getenv("DJANGO_TIME_ZONE", "Asia/Kolkata")
 CELERY_TASK_TRACK_STARTED = True
-CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes
+CELERY_TASK_TIME_LIMIT = 30 * 60
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+CELERY_TASK_ALWAYS_EAGER = True
+CELERY_TASK_EAGER_PROPAGATES = True
 
-# Celery Beat Schedule for periodic tasks
 CELERY_BEAT_SCHEDULE = {
     "clean-expired-otps": {
         "task": "core.tasks.clean_expired_otps",
-        "schedule": 600.0,  # Every 10 minutes
+        "schedule": 600.0,
     },
     "generate-analytics-snapshot": {
         "task": "core.tasks.generate_analytics_snapshot",
-        "schedule": 3600.0,  # Every hour
+        "schedule": 3600.0,
     },
     "check-and-notify-stock-alerts": {
         "task": "core.tasks.check_stock_alerts",
-        "schedule": 1800.0,  # Every 30 minutes
+        "schedule": 1800.0,
     },
 }
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# ==================== Phase 2: Elasticsearch Configuration ====================
-# Only configure Elasticsearch if it's enabled
 if os.getenv("USE_ELASTICSEARCH", "False").lower() in ["true", "1"]:
     ELASTICSEARCH_DSL = {
         'default': {
@@ -313,11 +324,9 @@ if os.getenv("USE_ELASTICSEARCH", "False").lower() in ["true", "1"]:
 else:
     ELASTICSEARCH_DSL = {}
 
-# ==================== Phase 2: Analytics Configuration ====================
-ANALYTICS_CACHE_TIMEOUT = int(os.getenv("ANALYTICS_CACHE_TIMEOUT", "3600"))  # 1 hour
+ANALYTICS_CACHE_TIMEOUT = int(os.getenv("ANALYTICS_CACHE_TIMEOUT", "3600"))
 ENABLE_ANALYTICS = os.getenv("ENABLE_ANALYTICS", "True").lower() in ["true", "1"]
 
-# Security Headers
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = "DENY"
@@ -330,14 +339,13 @@ SESSION_COOKIE_SAMESITE = "Lax"
 
 if not DEBUG:
     SECURE_SSL_REDIRECT = True
-    SECURE_HSTS_SECONDS = 31536000  # 1 year
+    SECURE_HSTS_SECONDS = 31536000
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
 else:
     SECURE_SSL_REDIRECT = False
     SECURE_HSTS_SECONDS = 0
 
-# Logging Configuration
 import logging.config
 
 LOGS_DIR = BASE_DIR / "logs"
@@ -365,7 +373,7 @@ LOGGING = {
             "level": "WARNING",
             "class": "logging.handlers.RotatingFileHandler",
             "filename": LOGS_DIR / "django.log",
-            "maxBytes": 1024 * 1024 * 10,  # 10MB
+            "maxBytes": 1024 * 1024 * 10,
             "backupCount": 5,
             "formatter": "verbose",
         },

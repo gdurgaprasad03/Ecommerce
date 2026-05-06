@@ -13,7 +13,7 @@ class AnalyticsSnapshot(models.Model):
     featured_products_count = models.IntegerField(default=0)
     top_selling_products_count = models.IntegerField(default=0)
     new_arrivals_count = models.IntegerField(default=0)
-    
+
     total_users = models.IntegerField(default=0)
     active_users_today = models.IntegerField(default=0)
     active_users_this_week = models.IntegerField(default=0)
@@ -21,7 +21,7 @@ class AnalyticsSnapshot(models.Model):
     new_users_today = models.IntegerField(default=0)
     new_users_this_week = models.IntegerField(default=0)
     new_users_this_month = models.IntegerField(default=0)
-    
+
     total_reviews = models.IntegerField(default=0)
     average_rating = models.FloatField(default=0.0)
     five_star_reviews = models.IntegerField(default=0)
@@ -30,60 +30,58 @@ class AnalyticsSnapshot(models.Model):
     two_star_reviews = models.IntegerField(default=0)
     one_star_reviews = models.IntegerField(default=0)
     verified_reviews = models.IntegerField(default=0)
-    
+
     total_wishlists = models.IntegerField(default=0)
     total_wishlist_items = models.IntegerField(default=0)
     average_wishlist_size = models.FloatField(default=0.0)
     most_wishlisted_product = models.CharField(max_length=255, blank=True, null=True)
-    
+
     total_stock_value = models.FloatField(default=0.0)
     out_of_stock_products = models.IntegerField(default=0)
     low_stock_products = models.IntegerField(default=0)
     products_with_zero_views = models.IntegerField(default=0)
-    
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     class Meta:
         ordering = ["-created_at"]
         indexes = [
             models.Index(fields=["created_at"]),
         ]
-    
+
     def __str__(self):
         return f"Analytics Snapshot - {self.created_at.strftime('%Y-%m-%d %H:%M')}"
-
 
 class ProductAnalytics(models.Model):
     product_id = models.IntegerField(db_index=True)
     product_name = models.CharField(max_length=255)
-    
+
     views_today = models.IntegerField(default=0)
     views_this_week = models.IntegerField(default=0)
     views_this_month = models.IntegerField(default=0)
     total_views = models.IntegerField(default=0)
-    
+
     reviews_count = models.IntegerField(default=0)
     average_rating = models.FloatField(default=0.0)
-    
+
     wishlist_count = models.IntegerField(default=0)
-    
+
     stock_quantity = models.IntegerField(default=0)
     stock_value = models.FloatField(default=0.0)
-    
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     class Meta:
         ordering = ["-total_views"]
         indexes = [
             models.Index(fields=["product_id"]),
             models.Index(fields=["total_views"]),
         ]
-    
+
     def __str__(self):
         return f"{self.product_name} - {self.total_views} views"
-
 
 class AnalyticsManager:
     @staticmethod
@@ -93,9 +91,9 @@ class AnalyticsManager:
         cached = CacheManager.get_cache(cache_key)
         if cached:
             return cached
-        
+
         from products.models import Product
-        
+
         products = Product.objects.filter(is_active=True)
         data = {
             "total_products": products.count(),
@@ -107,7 +105,7 @@ class AnalyticsManager:
         }
         CacheManager.set_cache(cache_key, data, timeout=1800)
         return data
-    
+
     @staticmethod
     def get_customer_metrics():
         from core.cache_utils import CacheManager
@@ -115,12 +113,12 @@ class AnalyticsManager:
         cached = CacheManager.get_cache(cache_key)
         if cached:
             return cached
-        
+
         now = timezone.now()
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         week_start = today_start - timedelta(days=7)
         month_start = today_start - timedelta(days=30)
-        
+
         users = User.objects.all()
         data = {
             "total_users": users.count(),
@@ -133,7 +131,7 @@ class AnalyticsManager:
         }
         CacheManager.set_cache(cache_key, data, timeout=1800)
         return data
-    
+
     @staticmethod
     def get_review_metrics():
         from core.cache_utils import CacheManager
@@ -141,7 +139,7 @@ class AnalyticsManager:
         cached = CacheManager.get_cache(cache_key)
         if cached:
             return cached
-        
+
         from reviews.models import ProductReview
         reviews = ProductReview.objects.all()
         data = {
@@ -156,7 +154,7 @@ class AnalyticsManager:
         }
         CacheManager.set_cache(cache_key, data, timeout=1800)
         return data
-    
+
     @staticmethod
     def get_wishlist_metrics():
         from core.cache_utils import CacheManager
@@ -164,10 +162,10 @@ class AnalyticsManager:
         cached = CacheManager.get_cache(cache_key)
         if cached:
             return cached
-        
+
         from wishlist.models import Wishlist
         from products.models import Product
-        
+
         wishlists = Wishlist.objects.all()
         if wishlists.exists():
             most_wishlisted = Product.objects.annotate(
@@ -179,7 +177,7 @@ class AnalyticsManager:
         else:
             most_wishlisted = None
             avg_size = 0
-        
+
         data = {
             "total_wishlists": wishlists.count(),
             "total_items": sum(w.products.count() for w in wishlists),
@@ -188,7 +186,7 @@ class AnalyticsManager:
         }
         CacheManager.set_cache(cache_key, data, timeout=1800)
         return data
-    
+
     @staticmethod
     def get_inventory_metrics():
         from core.cache_utils import CacheManager
@@ -196,7 +194,7 @@ class AnalyticsManager:
         cached = CacheManager.get_cache(cache_key)
         if cached:
             return cached
-        
+
         from inventory.models import Inventory
         inventory = Inventory.objects.select_related('product').all()
         out_of_stock = inventory.filter(stock=0).count()
@@ -209,15 +207,15 @@ class AnalyticsManager:
         }
         CacheManager.set_cache(cache_key, data, timeout=1800)
         return data
-    
+
     @staticmethod
     def get_dashboard_summary():
         from products.models import Category, Product
         from inventory.models import Inventory
         from orders.models import CustomerRequest
-        
+
         low_stock_threshold = 10
-        
+
         return {
             "counts": {
                 "total_categories": Category.objects.filter(is_active=True).count(),
@@ -228,7 +226,7 @@ class AnalyticsManager:
             },
             "alerts": {
                 "low_stock_products": [
-                    {"id": i.product.id, "name": i.product.name, "stock": i.stock} 
+                    {"id": i.product.id, "name": i.product.name, "stock": i.stock}
                     for i in Inventory.objects.select_related("product").filter(stock__lte=low_stock_threshold)[:5]
                 ],
             },
@@ -244,7 +242,7 @@ class AnalyticsManager:
             },
             "recent": {
                 "requests": [
-                    {"id": r.id, "name": r.name, "product": r.product.name if r.product else None, "status": r.status} 
+                    {"id": r.id, "name": r.name, "product": r.product.name if r.product else None, "status": r.status}
                     for r in CustomerRequest.objects.select_related("product").order_by("-created_at")[:5]
                 ]
             }

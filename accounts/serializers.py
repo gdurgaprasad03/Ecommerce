@@ -36,11 +36,10 @@ class CustomerRegistrationSerializer(SanitizedModelSerializer):
         domain = value.split('@')[1].lower() if '@' in value else ""
         if domain in disposable_domains:
             raise serializers.ValidationError("Disposable email addresses are not allowed")
-        
-        # Check if email already exists (case-insensitive)
+
         if User.objects.filter(email__iexact=value).exclude(id=self.instance.id if self.instance else None).exists():
             raise serializers.ValidationError("User with this email already exists")
-        
+
         return value
 
     def validate_password(self, value):
@@ -49,7 +48,7 @@ class CustomerRegistrationSerializer(SanitizedModelSerializer):
             validate_password_complexity(value)
             django_validate_password(value)
         except Exception as e:
-            # Re-raise as DRF ValidationError with clean messages
+
             if hasattr(e, 'messages'):
                 raise serializers.ValidationError(e.messages)
             raise serializers.ValidationError(str(e))
@@ -85,11 +84,9 @@ class CustomerRegistrationSerializer(SanitizedModelSerializer):
         attrs["company_name"] = attrs["company_name"].strip()
         attrs["company_address"] = attrs["company_address"].strip()
 
-        # Remove confirm_password as it's not a field in User model
         attrs.pop("confirm_password", None)
 
         return attrs
-
 
 class OTPVerifySerializer(serializers.Serializer):
     email = serializers.EmailField()
@@ -100,18 +97,15 @@ class OTPVerifySerializer(serializers.Serializer):
         otp = attrs.get("otp") or attrs.get("code")
         if not otp:
             raise serializers.ValidationError({"otp": "OTP is required."})
-        
-        # Validate OTP format (should be digits only)
+
         if not otp.isdigit():
             raise serializers.ValidationError({"otp": "OTP must contain only digits."})
-        
+
         attrs["otp"] = otp
         return attrs
 
-
 class OTPResendSerializer(serializers.Serializer):
     email = serializers.EmailField()
-
 
 class LoginSerializer(serializers.Serializer):
     username = serializers.CharField(required=False, allow_blank=True, max_length=150)
@@ -121,18 +115,16 @@ class LoginSerializer(serializers.Serializer):
     def validate(self, attrs):
         login_id = (attrs.get("username") or attrs.get("email") or "").strip()
         password = attrs.get("password", "").strip()
-        
+
         if not login_id or not password:
             raise serializers.ValidationError("Username/email and password are required.")
-        
+
         attrs["login_id"] = login_id
         attrs["password"] = password
         return attrs
 
-
 class PasswordResetRequestSerializer(serializers.Serializer):
     email = serializers.EmailField()
-
 
 class PasswordResetConfirmSerializer(serializers.Serializer):
     email = serializers.EmailField()
@@ -145,13 +137,13 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
         otp = attrs.get("otp") or attrs.get("code")
         if not otp:
             raise serializers.ValidationError({"otp": "OTP is required."})
-        
+
         if not otp.isdigit():
             raise serializers.ValidationError({"otp": "OTP must contain only digits."})
-        
+
         if attrs.get("new_password") != attrs.get("confirm_password"):
             raise serializers.ValidationError({"confirm_password": "Passwords do not match."})
-            
+
         attrs["otp"] = otp
         return attrs
 

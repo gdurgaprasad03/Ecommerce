@@ -13,7 +13,7 @@ class WishlistSerializer(serializers.ModelSerializer):
         many=True,
         source="products"
     )
-    
+
     class Meta:
         model = Wishlist
         fields = ["id", "user", "products", "product_ids", "created_at", "updated_at"]

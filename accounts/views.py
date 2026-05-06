@@ -150,7 +150,7 @@ class ResendOTPAPIView(APIView):
         otp_verification = OTPVerification.objects.filter(user=user).first()
         if not otp_verification:
              otp_verification = OTPVerification.objects.create(user=user, otp=generate_otp(), expires_at=timezone.now() + timedelta(minutes=OTP_EXPIRY_MINUTES))
-        
+
         now = timezone.now()
         if (now - otp_verification.last_sent_at).total_seconds() < OTP_RESEND_COOLDOWN_SECONDS:
             return Response({"error": f"Please wait {OTP_RESEND_COOLDOWN_SECONDS} seconds before requesting another OTP."}, status=status.HTTP_429_TOO_MANY_REQUESTS)

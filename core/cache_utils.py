@@ -9,18 +9,15 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Cache key prefixes
 PRODUCT_CACHE_PREFIX = "product:"
 CATEGORY_CACHE_PREFIX = "category:"
 BRAND_CACHE_PREFIX = "brand:"
 PRODUCT_LIST_CACHE_PREFIX = "product_list:"
 ANALYTICS_CACHE_PREFIX = "analytics:"
 
-# Cache timeouts
 DEFAULT_CACHE_TIMEOUT = settings.CACHES['default'].get('TIMEOUT', 3600)
-SHORT_CACHE_TIMEOUT = 300  # 5 minutes
-LONG_CACHE_TIMEOUT = 86400  # 24 hours
-
+SHORT_CACHE_TIMEOUT = 300
+LONG_CACHE_TIMEOUT = 86400
 
 class CacheManager:
     """Manages application caching operations"""
@@ -59,12 +56,12 @@ class CacheManager:
     def set_cache(key: str, value, timeout: int = DEFAULT_CACHE_TIMEOUT) -> bool:
         """
         Set a cache value
-        
+
         Args:
             key: Cache key
             value: Value to cache
             timeout: Cache timeout in seconds
-            
+
         Returns:
             True if successful, False otherwise
         """
@@ -80,11 +77,11 @@ class CacheManager:
     def get_cache(key: str, default=None):
         """
         Get a cache value
-        
+
         Args:
             key: Cache key
             default: Default value if key not found
-            
+
         Returns:
             Cached value or default
         """
@@ -103,10 +100,10 @@ class CacheManager:
     def delete_cache(key: str) -> bool:
         """
         Delete a cache value
-        
+
         Args:
             key: Cache key
-            
+
         Returns:
             True if successful, False otherwise
         """
@@ -122,10 +119,10 @@ class CacheManager:
     def delete_pattern(pattern: str) -> bool:
         """
         Delete all cache keys matching a pattern
-        
+
         Args:
             pattern: Pattern to match (e.g., "product:*")
-            
+
         Returns:
             True if successful, False otherwise
         """
@@ -141,10 +138,10 @@ class CacheManager:
     def clear_product_cache(product_id: int = None) -> bool:
         """
         Clear product cache
-        
+
         Args:
             product_id: Specific product ID to clear, or None to clear all products
-            
+
         Returns:
             True if successful, False otherwise
         """
@@ -193,11 +190,10 @@ class CacheManager:
             logger.error(f"Error clearing all cache: {str(e)}")
             return False
 
-
 def cache_decorator(timeout: int = DEFAULT_CACHE_TIMEOUT, key_prefix: str = ""):
     """
     Decorator to cache function results
-    
+
     Usage:
         @cache_decorator(timeout=600, key_prefix="my_func")
         def expensive_function(arg1, arg2):
@@ -205,19 +201,17 @@ def cache_decorator(timeout: int = DEFAULT_CACHE_TIMEOUT, key_prefix: str = ""):
     """
     def decorator(func):
         def wrapper(*args, **kwargs):
-            # Generate cache key from function name and arguments
+
             cache_key = f"{key_prefix or func.__name__}:{str(args)}:{str(kwargs)}"
             cache_key = cache_key.replace(" ", "").replace("'", "")
-            
-            # Try to get from cache
+
             result = CacheManager.get_cache(cache_key)
             if result is not None:
                 return result
-            
-            # Execute function and cache result
+
             result = func(*args, **kwargs)
             CacheManager.set_cache(cache_key, result, timeout)
             return result
-        
+
         return wrapper
     return decorator

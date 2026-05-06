@@ -11,5 +11,5 @@ def clear_inventory_analytics_cache(sender, instance, **kwargs):
     """
     cache_key = "analytics:inventory_metrics"
     CacheManager.delete_cache(cache_key)
-    # Also clear the comprehensive cache as it includes inventory
+
     CacheManager.delete_cache("analytics:comprehensive")

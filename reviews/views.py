@@ -23,32 +23,30 @@ class ProductReviewAPIView(APIView):
         reviews = ProductReview.objects.select_related("user", "product").all()
         serializer = ProductReviewSerializer(reviews, many=True)
         return Response(serializer.data)
-    
+
     def post(self, request):
         if not request.user.is_authenticated:
             return Response({"error": "Authentication required."}, status=status.HTTP_401_UNAUTHORIZED)
-        
+
         product_id = request.data.get("product")
         if not product_id:
             return Response({"error": "product_id is required."}, status=status.HTTP_400_BAD_REQUEST)
-        
+
         try:
             product = Product.objects.get(pk=product_id)
         except Product.DoesNotExist:
             return Response({"error": "Product not found."}, status=status.HTTP_404_NOT_FOUND)
-        
-        # Check if user already reviewed this product
+
         existing_review = ProductReview.objects.filter(product=product, user=request.user).first()
-        
+
         if existing_review:
-            # Update existing review
+
             serializer = ProductReviewSerializer(existing_review, data=request.data, partial=True)
             if serializer.is_valid():
                 serializer.save()
                 return Response({"message": "Review updated successfully.", "review": serializer.data}, status=status.HTTP_200_OK)
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Create new review
+
         serializer = ProductReviewSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save(user=request.user)
@@ -66,7 +64,7 @@ class ReviewDetailAPIView(APIView):
             serializer.save()
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    
+
     def delete(self, request, review_id):
         try: review = ProductReview.objects.get(pk=review_id)
         except ProductReview.DoesNotExist: return Response({"error": "Review not found."}, status=status.HTTP_404_NOT_FOUND)

@@ -1,6 +1,7 @@
 from django.db import models
 from django.core.validators import MaxValueValidator, MinValueValidator
 
+
 class Category(models.Model):
     name = models.CharField(max_length=200)
     parent = models.ForeignKey(
@@ -17,12 +18,16 @@ class Category(models.Model):
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(fields=["name", "parent"], name="uniq_category_name_parent")
+            models.UniqueConstraint(
+                fields=["name", "parent"],
+                name="uniq_category_name_parent",
+            )
         ]
         ordering = ["name"]
 
     def __str__(self):
         return self.name
+
 
 class Brand(models.Model):
     name = models.CharField(max_length=200, unique=True)
@@ -37,9 +42,15 @@ class Brand(models.Model):
     def __str__(self):
         return self.name
 
+
 class Product(models.Model):
-    brand = models.ForeignKey(Brand, on_delete=models.PROTECT, related_name="products", null=True, blank=True)
-    category = models.ForeignKey(Category, on_delete=models.PROTECT, related_name="products")
+    brand = models.ForeignKey(
+        Brand, on_delete=models.PROTECT, related_name="products",
+        null=True, blank=True,
+    )
+    category = models.ForeignKey(
+        Category, on_delete=models.PROTECT, related_name="products",
+    )
     subcategory = models.ForeignKey(
         Category,
         on_delete=models.SET_NULL,
@@ -49,11 +60,14 @@ class Product(models.Model):
     )
     name = models.CharField(max_length=255, db_index=True)
     mpn = models.CharField(max_length=100, null=True, blank=True)
-    sku = models.CharField(max_length=100, null=True, blank=True)
+    sku = models.CharField(max_length=100, null=True, blank=True, unique=True)
     description = models.TextField()
     product_image = models.ImageField(upload_to="products/", null=True, blank=True)
     highlights = models.TextField(null=True, blank=True)
-    rating = models.FloatField(default=0, validators=[MinValueValidator(0), MaxValueValidator(5)])
+    rating = models.FloatField(
+        default=0,
+        validators=[MinValueValidator(0), MaxValueValidator(5)],
+    )
     featured = models.BooleanField(default=False)
     top_selling = models.BooleanField(default=False)
     new_arrival = models.BooleanField(default=False)
@@ -63,12 +77,19 @@ class Product(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["is_active", "category"]),
+            models.Index(fields=["is_active", "featured"]),
+        ]
 
     def __str__(self):
         return self.name
 
+
 class ProductImage(models.Model):
-    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="images")
+    product = models.ForeignKey(
+        Product, on_delete=models.CASCADE, related_name="images",
+    )
     image = models.ImageField(upload_to="products/")
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -78,11 +99,10 @@ class ProductImage(models.Model):
     def __str__(self):
         return f"{self.product.name} Image"
 
+
 class ProductSpecification(models.Model):
     product = models.ForeignKey(
-        Product,
-        on_delete=models.CASCADE,
-        related_name="specifications"
+        Product, on_delete=models.CASCADE, related_name="specifications",
     )
     section = models.CharField(max_length=100, default="General")
     key = models.CharField(max_length=100)
@@ -92,11 +112,10 @@ class ProductSpecification(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=["product", "section", "key"],
-                name="uniq_product_spec_section_key"
+                name="uniq_product_spec_section_key",
             )
         ]
         ordering = ["section", "key"]
 
     def __str__(self):
         return f"{self.product.name} - {self.section} - {self.key}"
-  

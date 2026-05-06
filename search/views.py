@@ -8,13 +8,13 @@ logger = logging.getLogger(__name__)
 
 class ElasticsearchSearchAPIView(APIView):
     permission_classes = [AllowAny]
-    
+
     def get(self, request):
         from .search import ElasticsearchSearchManager
         query = request.query_params.get('q', '')
         if not query or len(query) < 2:
             return Response({"error": "Search query must be at least 2 characters"}, status=status.HTTP_400_BAD_REQUEST)
-        
+
         try:
             filters = {
                 'category': request.query_params.get('category'),
@@ -25,7 +25,7 @@ class ElasticsearchSearchAPIView(APIView):
             }
             filters = {k: v for k, v in filters.items() if v is not None}
             results = ElasticsearchSearchManager.search(query, **filters)
-            
+
             return Response({'query': query, 'count': len(results), 'results': results}, status=status.HTTP_200_OK)
         except Exception as e:
             logger.error(f"Elasticsearch search error: {str(e)}")
@@ -33,13 +33,13 @@ class ElasticsearchSearchAPIView(APIView):
 
 class AutocompleteAPIView(APIView):
     permission_classes = [AllowAny]
-    
+
     def get(self, request):
         from .search import ElasticsearchSearchManager
         prefix = request.query_params.get('prefix', '')
         if not prefix or len(prefix) < 2:
             return Response({"suggestions": []}, status=status.HTTP_200_OK)
-        
+
         try:
             suggestions = ElasticsearchSearchManager.autocomplete(prefix)
             return Response({'prefix': prefix, 'suggestions': suggestions}, status=status.HTTP_200_OK)
@@ -49,7 +49,7 @@ class AutocompleteAPIView(APIView):
 
 class SearchFacetsAPIView(APIView):
     permission_classes = [AllowAny]
-    
+
     def get(self, request):
         from .search import ElasticsearchSearchManager
         try:

@@ -34,7 +34,6 @@ class CustomerRequest(models.Model):
     def __str__(self):
         return f"{self.name} - {self.product.name}"
 
-
 class Enquiry(models.Model):
     name = models.CharField(max_length=255)
     company_name = models.CharField(max_length=255)
