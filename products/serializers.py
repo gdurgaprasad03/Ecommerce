@@ -80,6 +80,10 @@ class ProductSerializer(SanitizedModelSerializer):
         for field in ["category", "subcategory", "brand"]:
             if field in data and isinstance(data[field], dict) and "id" in data[field]:
                 data[field] = data[field]["id"]
+            val = data.get("product_image")
+            if isinstance(val, str):
+                data.pop("product_image")
+        
         return super().to_internal_value(data)
 
 

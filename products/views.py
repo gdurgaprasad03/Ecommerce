@@ -234,7 +234,6 @@ class ProductDetailAPIView(APIView):
         return Response(serializer.data)
 
     def patch(self, request, pk):
-        # Same behavior as PUT for partial updates
         return self.put(request, pk)
 
     def delete(self, request, pk):
