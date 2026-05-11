@@ -53,6 +53,12 @@ class CategorySimpleSerializer(serializers.ModelSerializer):
         fields = ["id", "name", "parent", "navbar_group", "is_active"]
 
 
+class ProductMinimalSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Product
+        fields = ["id", "name", "product_image", "sku", "is_active"]
+
+
 class ProductSerializer(SanitizedModelSerializer):
     brand_name = serializers.ReadOnlyField(source="brand.name")
     category_name = serializers.ReadOnlyField(source="category.name")
@@ -64,13 +70,35 @@ class ProductSerializer(SanitizedModelSerializer):
             "id", "category", "category_name", "subcategory", "subcategory_name",
             "name", "product_image", "brand", "brand_name", "mpn", "sku",
             "description", "highlights", "rating", "featured", "top_selling",
-            "new_arrival", "is_active", "created_at", "updated_at",
+            "new_arrival", "is_active", "related_products", "created_at", "updated_at",
         ]
         # is_active is now writable. Public read access is filtered at the view layer.
         read_only_fields = [
             "id", "category_name", "subcategory_name", "brand_name",
             "created_at", "updated_at",
         ]
+
+    def to_representation(self, instance):
+        representation = super().to_representation(instance)
+        # Use ProductMinimalSerializer for related products to avoid recursion and heavy payload
+        if "related_products" in representation:
+            related_products = instance.related_products.filter(is_active=True)
+            representation["related_products"] = ProductMinimalSerializer(related_products, many=True).data
+        
+        # Generate WhatsApp Share Link
+        from django.conf import settings
+        frontend_url = getattr(settings, "FRONTEND_BASE_URL", "http://localhost:5173")
+        product_url = f"{frontend_url}/products/{instance.id}"
+        message = f"Hey, check out this {instance.name} on our site! {product_url}"
+        from django.utils.http import urlencode
+        representation["whatsapp_share_link"] = f"https://wa.me/?text={urlencode({'': message})[1:]}"
+        
+        # SEO Meta Tags
+        representation["meta_title"] = f"{instance.name} | Buy {instance.category.name if instance.category else 'Products'} Online"
+        desc = instance.description or ""
+        representation["meta_description"] = (desc[:157] + "...") if len(desc) > 160 else desc
+        
+        return representation
 
     def validate_product_image(self, value):
         return validate_image_file(value)

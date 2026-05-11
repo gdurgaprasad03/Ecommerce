@@ -234,6 +234,7 @@ REST_FRAMEWORK = {
         "login": "20/min",
         "otp": "20/min",
         "password_reset": "20/min",
+        "inquiry": "5/hour",
     },
 }
 

@@ -6,6 +6,7 @@ from .views import (
     ProductAPIView, ProductDetailAPIView, ProductImageDetailAPIView,
     ProductImageListAPIView, ProductListAPIView,
     ProductSpecificationDetailAPIView, ProductSpecificationListAPIView,
+    RecentlyViewedProductsAPIView,
     SearchFacetsAPIView, SimilarProductsAPIView, SubCategoryAPIView,
 )
 
@@ -24,6 +25,7 @@ urlpatterns = [
     path("products/facets/", SearchFacetsAPIView.as_view(), name="product-facets"),
     path("products/<int:product_id>/similar/", SimilarProductsAPIView.as_view(), name="similar-products"),
     path("products/bulk/upload/", BulkProductUploadAPIView.as_view(), name="bulk-product-upload"),
+    path("products/recently-viewed/", RecentlyViewedProductsAPIView.as_view(), name="recently-viewed"),
 
     path("images/", ProductImageListAPIView.as_view(), name="image-list-create"),
     path("images/<int:pk>/", ProductImageDetailAPIView.as_view(), name="image-detail"),

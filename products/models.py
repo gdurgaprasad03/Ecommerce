@@ -1,4 +1,5 @@
 from django.db import models
+from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
 
 
@@ -72,6 +73,13 @@ class Product(models.Model):
     top_selling = models.BooleanField(default=False)
     new_arrival = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
+    related_products = models.ManyToManyField(
+        "self",
+        blank=True,
+        symmetrical=False,
+        related_name="accessory_for",
+        help_text="Products that are accessories or frequently bought with this item."
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -119,3 +127,20 @@ class ProductSpecification(models.Model):
 
     def __str__(self):
         return f"{self.product.name} - {self.section} - {self.key}"
+
+
+class RecentlyViewedProduct(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, 
+        on_delete=models.CASCADE, 
+        related_name="recently_viewed"
+    )
+    product = models.ForeignKey(Product, on_delete=models.CASCADE)
+    viewed_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-viewed_at"]
+        unique_together = ["user", "product"]
+
+    def __str__(self):
+        return f"User {self.user_id} viewed {self.product.name}"

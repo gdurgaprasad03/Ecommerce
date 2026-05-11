@@ -6,7 +6,7 @@ from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import FormParser, MultiPartParser
-from rest_framework.permissions import AllowAny, IsAdminUser
+from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -223,6 +223,15 @@ class ProductDetailAPIView(APIView):
         if not (request.user.is_authenticated and request.user.is_staff):
             queryset = queryset.filter(is_active=True)
         product = get_object_or_404(queryset, pk=pk)
+        
+        # Record history for authenticated users
+        if request.user.is_authenticated:
+            from .models import RecentlyViewedProduct
+            RecentlyViewedProduct.objects.update_or_create(
+                user=request.user,
+                product=product
+            )
+            
         return Response(ProductSerializer(product).data)
 
     def put(self, request, pk):
@@ -317,6 +326,21 @@ class ProductListAPIView(APIView):
         serializer = ProductSerializer(
             page_obj, many=True, context={"request": request})
         return paginator.get_paginated_response(serializer.data)
+
+
+class RecentlyViewedProductsAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from .models import RecentlyViewedProduct
+        history = RecentlyViewedProduct.objects.filter(
+            user=request.user,
+            product__is_active=True
+        ).select_related("product", "product__brand", "product__category")[:10]
+        
+        products = [h.product for h in history]
+        serializer = ProductSerializer(products, many=True, context={"request": request})
+        return Response(serializer.data)
 
 
 class AutocompleteAPIView(APIView):

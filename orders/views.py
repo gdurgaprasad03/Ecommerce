@@ -15,6 +15,7 @@ from core.tasks import send_customer_request_email, send_enquiry_email
 logger = logging.getLogger(__name__)
 
 class CustomerRequestAPIView(PaginatedAPIView):
+    throttle_scope = "inquiry"
     def get_permissions(self):
         if self.request.method in ["POST", "GET", "OPTIONS"]:
             return [AllowAny()]
@@ -55,6 +56,7 @@ class CustomerRequestAPIView(PaginatedAPIView):
         return Response({"message": "Status updated successfully.", "status": req.status}, status=status.HTTP_200_OK)
 
 class EnquiryAPIView(PaginatedAPIView):
+    throttle_scope = "inquiry"
     def get_permissions(self):
         if self.request.method in ["POST", "GET", "OPTIONS"]:
             return [AllowAny()]
