@@ -78,7 +78,14 @@ class Product(models.Model):
         blank=True,
         symmetrical=False,
         related_name="accessory_for",
-        help_text="Products that are accessories or frequently bought with this item."
+        help_text="Products that are accessories for this item (e.g. Bag, Mouse for a Laptop)."
+    )
+    frequently_bought_together = models.ManyToManyField(
+        "self",
+        blank=True,
+        symmetrical=False,
+        related_name="bought_with",
+        help_text="Products that are frequently bought together with this item."
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -87,7 +94,11 @@ class Product(models.Model):
         ordering = ["-created_at"]
         indexes = [
             models.Index(fields=["is_active", "category"]),
+            models.Index(fields=["is_active", "subcategory"]),
             models.Index(fields=["is_active", "featured"]),
+            models.Index(fields=["is_active", "top_selling"]),
+            models.Index(fields=["is_active", "new_arrival"]),
+            models.Index(fields=["is_active", "created_at"]),
         ]
 
     def __str__(self):

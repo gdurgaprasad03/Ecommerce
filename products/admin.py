@@ -26,6 +26,7 @@ class ProductAdmin(admin.ModelAdmin):
     list_display = ("id", "name", "brand", "category", "featured", "top_selling", "new_arrival", "created_at")
     list_filter = ("category", "featured", "top_selling", "new_arrival", "created_at")
     search_fields = ("name", "brand__name", "description", "highlights")
+    filter_horizontal = ("related_products", "frequently_bought_together")
     inlines = [ProductImageInline, ProductSpecificationInline]
 
 @admin.register(ProductImage)

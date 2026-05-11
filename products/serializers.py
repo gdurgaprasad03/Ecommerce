@@ -1,3 +1,5 @@
+from django.conf import settings
+from django.utils.http import urlencode
 from rest_framework import serializers
 from rest_framework.validators import UniqueTogetherValidator
 from core.utils.serializers import SanitizedModelSerializer, validate_image_file
@@ -70,7 +72,7 @@ class ProductSerializer(SanitizedModelSerializer):
             "id", "category", "category_name", "subcategory", "subcategory_name",
             "name", "product_image", "brand", "brand_name", "mpn", "sku",
             "description", "highlights", "rating", "featured", "top_selling",
-            "new_arrival", "is_active", "related_products", "created_at", "updated_at",
+            "new_arrival", "is_active", "related_products", "frequently_bought_together", "created_at", "updated_at",
         ]
         # is_active is now writable. Public read access is filtered at the view layer.
         read_only_fields = [
@@ -80,17 +82,25 @@ class ProductSerializer(SanitizedModelSerializer):
 
     def to_representation(self, instance):
         representation = super().to_representation(instance)
-        # Use ProductMinimalSerializer for related products to avoid recursion and heavy payload
+        
+        # Use prefetched related products if available to avoid extra DB queries
         if "related_products" in representation:
-            related_products = instance.related_products.filter(is_active=True)
+            # We filter in-memory if already prefetched, or fallback to DB if not
+            related_products = getattr(instance, "active_related_products", None)
+            if related_products is None:
+                related_products = instance.related_products.filter(is_active=True)
             representation["related_products"] = ProductMinimalSerializer(related_products, many=True).data
         
-        # Generate WhatsApp Share Link
-        from django.conf import settings
+        if "frequently_bought_together" in representation:
+            fbt_products = getattr(instance, "active_fbt_products", None)
+            if fbt_products is None:
+                fbt_products = instance.frequently_bought_together.filter(is_active=True)
+            representation["frequently_bought_together"] = ProductMinimalSerializer(fbt_products, many=True).data
+        
+        # WhatsApp Share Link
         frontend_url = getattr(settings, "FRONTEND_BASE_URL", "http://localhost:5173")
         product_url = f"{frontend_url}/products/{instance.id}"
         message = f"Hey, check out this {instance.name} on our site! {product_url}"
-        from django.utils.http import urlencode
         representation["whatsapp_share_link"] = f"https://wa.me/?text={urlencode({'': message})[1:]}"
         
         # SEO Meta Tags

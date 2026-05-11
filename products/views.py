@@ -1,8 +1,10 @@
 import logging
 
-from django.db.models import Q
+from django.db.models import Q, Prefetch
 from django.db.models.deletion import ProtectedError
 from django.shortcuts import get_object_or_404
+from django.utils.decorators import method_decorator
+from django.views.decorators.cache import cache_page
 from rest_framework import status
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import FormParser, MultiPartParser
@@ -15,9 +17,9 @@ from search.search import ElasticsearchSearchManager
 
 from .models import Brand, Category, Product, ProductImage, ProductSpecification
 from .serializers import (
-    BrandSerializer, CategoryReadSerializer, CategorySerializer,
-    CategorySimpleSerializer, CategoryWriteSerializer, ProductImageSerializer,
-    ProductSerializer, ProductSpecificationSerializer,
+    BrandSerializer, CachedProductSerializer, CategoryReadSerializer,
+    CategorySerializer, CategorySimpleSerializer, CategoryWriteSerializer,
+    ProductImageSerializer, ProductSerializer, ProductSpecificationSerializer,
 )
 from .services import BulkProductUploadService
 
@@ -172,6 +174,7 @@ class ProductAPIView(PaginatedAPIView):
             return [AllowAny()]
         return [IsAdminUser()]
 
+    @method_decorator(cache_page(60 * 15, key_prefix="product_list"))
     def get(self, request):
         include_inactive = (
             request.user.is_authenticated
@@ -179,7 +182,11 @@ class ProductAPIView(PaginatedAPIView):
             and request.query_params.get("include_inactive", "").lower() == "true"
         )
         queryset = Product.objects.select_related(
-            "brand", "category", "subcategory")
+            "brand", "category", "subcategory"
+        ).prefetch_related(
+            Prefetch("related_products", queryset=Product.objects.filter(is_active=True), to_attr="active_related_products"),
+            Prefetch("frequently_bought_together", queryset=Product.objects.filter(is_active=True), to_attr="active_fbt_products"),
+        )
         if not include_inactive:
             queryset = queryset.filter(is_active=True)
 
@@ -217,9 +224,14 @@ class ProductDetailAPIView(APIView):
             return [AllowAny()]
         return [IsAdminUser()]
 
+    @method_decorator(cache_page(60 * 15, key_prefix="product_detail"))
     def get(self, request, pk):
         queryset = Product.objects.select_related(
-            "brand", "category", "subcategory")
+            "brand", "category", "subcategory"
+        ).prefetch_related(
+            Prefetch("related_products", queryset=Product.objects.filter(is_active=True), to_attr="active_related_products"),
+            Prefetch("frequently_bought_together", queryset=Product.objects.filter(is_active=True), to_attr="active_fbt_products"),
+        )
         if not (request.user.is_authenticated and request.user.is_staff):
             queryset = queryset.filter(is_active=True)
         product = get_object_or_404(queryset, pk=pk)
@@ -232,7 +244,7 @@ class ProductDetailAPIView(APIView):
                 product=product
             )
             
-        return Response(ProductSerializer(product).data)
+        return Response(CachedProductSerializer(product).data)
 
     def put(self, request, pk):
         product = get_object_or_404(Product, pk=pk)
@@ -263,6 +275,7 @@ class ProductDetailAPIView(APIView):
 class ProductListAPIView(APIView):
     permission_classes = [AllowAny]
 
+    @method_decorator(cache_page(60 * 15, key_prefix="product_search"))
     def get(self, request):
         search_query = request.query_params.get("search", "").strip()
         try:
@@ -299,6 +312,9 @@ class ProductListAPIView(APIView):
             preserved_order = {pid: pos for pos, pid in enumerate(product_ids)}
             queryset = Product.objects.filter(id__in=product_ids).select_related(
                 "brand", "category"
+            ).prefetch_related(
+                Prefetch("related_products", queryset=Product.objects.filter(is_active=True), to_attr="active_related_products"),
+                Prefetch("frequently_bought_together", queryset=Product.objects.filter(is_active=True), to_attr="active_fbt_products"),
             )
             products = sorted(
                 queryset, key=lambda x: preserved_order.get(str(x.id), 0))
@@ -313,8 +329,12 @@ class ProductListAPIView(APIView):
             })
 
         # DB fallback
-        queryset = Product.objects.filter(
-            is_active=True).select_related("brand", "category")
+        queryset = Product.objects.filter(is_active=True).select_related(
+            "brand", "category"
+        ).prefetch_related(
+            Prefetch("related_products", queryset=Product.objects.filter(is_active=True), to_attr="active_related_products"),
+            Prefetch("frequently_bought_together", queryset=Product.objects.filter(is_active=True), to_attr="active_fbt_products"),
+        )
         if search_query:
             queryset = queryset.filter(
                 Q(name__icontains=search_query) | Q(
