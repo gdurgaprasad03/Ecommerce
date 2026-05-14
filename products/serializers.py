@@ -114,22 +114,80 @@ class ProductSerializer(SanitizedModelSerializer):
         return validate_image_file(value)
 
     def validate_sku(self, value):
-        if value:
-            value = value.strip()
-            if value == "":
-                return None
-        return value or None
+        """
+        Normalize SKU field:
+        - Convert empty strings to None (NULL in DB)
+        - Strip whitespace from non-empty values
+        - Ensure only non-empty SKUs are saved
+        
+        This prevents duplicate empty string issues with the unique constraint.
+        PostgreSQL treats multiple empty strings as violating unique constraint,
+        but NULL values are allowed to repeat.
+        """
+        # Handle None
+        if value is None:
+            return None
+        
+        # Convert to string and strip whitespace
+        value = str(value).strip() if value else ""
+        
+        # If empty after stripping, convert to None (NULL in DB)
+        if not value:
+            return None
+        
+        # Check uniqueness only for non-empty values
+        existing = Product.objects.filter(sku=value).exclude(
+            pk=self.instance.pk if self.instance else None
+        ).exists()
+        
+        if existing:
+            raise serializers.ValidationError(
+                "A product with this SKU already exists. SKU must be unique."
+            )
+        
+        return value
 
     def to_internal_value(self, data):
         data = data.copy()
+        
+        # Normalize SKU before validation: convert empty strings to None
+        if "sku" in data:
+            sku_value = data.get("sku", "")
+            if isinstance(sku_value, str):
+                sku_value = sku_value.strip()
+            data["sku"] = sku_value if sku_value else None
+        
+        # Handle foreign key fields that might be dict objects
         for field in ["category", "subcategory", "brand"]:
             if field in data and isinstance(data[field], dict) and "id" in data[field]:
                 data[field] = data[field]["id"]
-            val = data.get("product_image")
-            if isinstance(val, str):
-                data.pop("product_image")
+        
+        # Remove product_image if it's a string (already uploaded)
+        val = data.get("product_image")
+        if isinstance(val, str):
+            data.pop("product_image", None)
         
         return super().to_internal_value(data)
+    
+    def create(self, validated_data):
+        """
+        Ensure SKU is None (not empty string) before saving to prevent unique constraint violation.
+        """
+        # Double-check SKU is None, not empty string
+        if validated_data.get("sku") == "":
+            validated_data["sku"] = None
+        
+        return super().create(validated_data)
+    
+    def update(self, instance, validated_data):
+        """
+        Ensure SKU is None (not empty string) before saving to prevent unique constraint violation.
+        """
+        # Double-check SKU is None, not empty string
+        if validated_data.get("sku") == "":
+            validated_data["sku"] = None
+        
+        return super().update(instance, validated_data)
 
 
 class ProductImageSerializer(SanitizedModelSerializer):

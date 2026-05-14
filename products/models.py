@@ -61,7 +61,7 @@ class Product(models.Model):
     )
     name = models.CharField(max_length=255, db_index=True)
     mpn = models.CharField(max_length=100, null=True, blank=True)
-    sku = models.CharField(max_length=100, null=True, blank=True, unique=True)
+    sku = models.CharField(max_length=100, null=True, blank=True)
     description = models.TextField()
     product_image = models.ImageField(upload_to="products/", null=True, blank=True)
     highlights = models.TextField(null=True, blank=True)
@@ -99,6 +99,13 @@ class Product(models.Model):
             models.Index(fields=["is_active", "top_selling"]),
             models.Index(fields=["is_active", "new_arrival"]),
             models.Index(fields=["is_active", "created_at"]),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["sku"],
+                condition=models.Q(sku__isnull=False),
+                name="products_product_sku_unique_nonnull"
+            ),
         ]
 
     def __str__(self):

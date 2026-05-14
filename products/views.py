@@ -1,10 +1,8 @@
 import logging
 
-from django.db.models import Q, Prefetch
+from django.db.models import Q, Prefetch, Avg
 from django.db.models.deletion import ProtectedError
 from django.shortcuts import get_object_or_404
-from django.utils.decorators import method_decorator
-from django.views.decorators.cache import cache_page
 from rest_framework import status
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import FormParser, MultiPartParser
@@ -14,7 +12,7 @@ from rest_framework.views import APIView
 
 from core.pagination.views import PaginatedAPIView
 from search.search import ElasticsearchSearchManager
-
+from .cache_utils import cache_product_list, cache_product_detail
 from .models import Brand, Category, Product, ProductImage, ProductSpecification
 from .serializers import (
     BrandSerializer, CachedProductSerializer, CategoryReadSerializer,
@@ -174,19 +172,30 @@ class ProductAPIView(PaginatedAPIView):
             return [AllowAny()]
         return [IsAdminUser()]
 
-    @method_decorator(cache_page(60 * 15, key_prefix="product_list"))
+    @cache_product_list(timeout=300)  # 5 minutes cache for public users, no cache for admins
     def get(self, request):
         include_inactive = (
             request.user.is_authenticated
             and request.user.is_staff
             and request.query_params.get("include_inactive", "").lower() == "true"
         )
+        
+        # OPTIMIZATION: Use select_related + prefetch_related to minimize DB queries
         queryset = Product.objects.select_related(
             "brand", "category", "subcategory"
         ).prefetch_related(
-            Prefetch("related_products", queryset=Product.objects.filter(is_active=True), to_attr="active_related_products"),
-            Prefetch("frequently_bought_together", queryset=Product.objects.filter(is_active=True), to_attr="active_fbt_products"),
+            Prefetch(
+                "related_products",
+                queryset=Product.objects.filter(is_active=True).only("id", "name", "product_image", "sku", "is_active"),
+                to_attr="active_related_products"
+            ),
+            Prefetch(
+                "frequently_bought_together",
+                queryset=Product.objects.filter(is_active=True).only("id", "name", "product_image", "sku", "is_active"),
+                to_attr="active_fbt_products"
+            ),
         )
+        
         if not include_inactive:
             queryset = queryset.filter(is_active=True)
 
@@ -224,13 +233,21 @@ class ProductDetailAPIView(APIView):
             return [AllowAny()]
         return [IsAdminUser()]
 
-    @method_decorator(cache_page(60 * 15, key_prefix="product_detail"))
+    @cache_product_detail(timeout=300)  # 5 minutes cache for public users, no cache for admins
     def get(self, request, pk):
         queryset = Product.objects.select_related(
             "brand", "category", "subcategory"
         ).prefetch_related(
-            Prefetch("related_products", queryset=Product.objects.filter(is_active=True), to_attr="active_related_products"),
-            Prefetch("frequently_bought_together", queryset=Product.objects.filter(is_active=True), to_attr="active_fbt_products"),
+            Prefetch(
+                "related_products",
+                queryset=Product.objects.filter(is_active=True).only("id", "name", "product_image", "sku", "is_active"),
+                to_attr="active_related_products"
+            ),
+            Prefetch(
+                "frequently_bought_together",
+                queryset=Product.objects.filter(is_active=True).only("id", "name", "product_image", "sku", "is_active"),
+                to_attr="active_fbt_products"
+            ),
         )
         if not (request.user.is_authenticated and request.user.is_staff):
             queryset = queryset.filter(is_active=True)
@@ -275,7 +292,6 @@ class ProductDetailAPIView(APIView):
 class ProductListAPIView(APIView):
     permission_classes = [AllowAny]
 
-    @method_decorator(cache_page(60 * 15, key_prefix="product_search"))
     def get(self, request):
         search_query = request.query_params.get("search", "").strip()
         try:
