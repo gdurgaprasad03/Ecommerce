@@ -113,6 +113,13 @@ class ProductSerializer(SanitizedModelSerializer):
     def validate_product_image(self, value):
         return validate_image_file(value)
 
+    def validate_sku(self, value):
+        if value:
+            value = value.strip()
+            if value == "":
+                return None
+        return value or None
+
     def to_internal_value(self, data):
         data = data.copy()
         for field in ["category", "subcategory", "brand"]:

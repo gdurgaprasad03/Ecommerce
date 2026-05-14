@@ -10,6 +10,7 @@ from .views import (
     SearchFacetsAPIView, SimilarProductsAPIView, SubCategoryAPIView,
 )
 
+
 urlpatterns = [
     path("categories/", CategoryAPIView.as_view(), name="category-list-create"),
     path("categories/<int:pk>/", CategoryDetailAPIView.as_view(), name="category-detail"),
