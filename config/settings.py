@@ -282,6 +282,10 @@ STORAGES = {
     },
 }
 
+# For backward compatibility with third-party apps like django-cloudinary-storage
+DEFAULT_FILE_STORAGE = STORAGES["default"]["BACKEND"]
+STATICFILES_STORAGE = STORAGES["staticfiles"]["BACKEND"]
+
 
 # ---------------------------------------------------------------------------
 # Email
