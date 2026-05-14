@@ -8,7 +8,7 @@ from core.views import home
 
 urlpatterns = [
     path('', home),
-    path('admin/', admin.site.urls),
+    path('backend-admin/', admin.site.urls),
     path('accounts/', include('accounts.urls')),
     path('products/', include('products.urls')),
     path('inventory/', include('inventory.urls')),
