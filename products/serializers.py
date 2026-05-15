@@ -17,6 +17,8 @@ class BrandSerializer(SanitizedModelSerializer):
     def validate_logo(self, value):
         try:
             return validate_image_file(value)
+        except serializers.ValidationError:
+            raise
         except Exception as e:
             logger.error(f"Error validating brand logo: {str(e)}", exc_info=True)
             raise serializers.ValidationError("Invalid logo file.")
@@ -79,11 +81,22 @@ class ProductSerializer(SanitizedModelSerializer):
     )
 
     def validate_uploaded_images(self, value):
-        try:
-            return [validate_image_file(f) for f in value]
-        except Exception as e:
-            logger.error(f"Error validating product images: {str(e)}", exc_info=True)
-            raise serializers.ValidationError("One or more uploaded images are invalid.")
+        validated = []
+        errors = []
+        for idx, f in enumerate(value):
+            try:
+                validated.append(validate_image_file(f))
+            except serializers.ValidationError as e:
+                detail = e.detail if isinstance(e.detail, list) else [e.detail]
+                name = getattr(f, "name", f"image #{idx + 1}")
+                errors.append(f"{name}: {' '.join(str(d) for d in detail)}")
+            except Exception as e:
+                logger.error(f"Error validating product image: {str(e)}", exc_info=True)
+                name = getattr(f, "name", f"image #{idx + 1}")
+                errors.append(f"{name}: validation failed.")
+        if errors:
+            raise serializers.ValidationError(errors)
+        return validated
 
     class Meta:
         model = Product
@@ -159,6 +172,8 @@ class ProductSerializer(SanitizedModelSerializer):
     def validate_product_image(self, value):
         try:
             return validate_image_file(value)
+        except serializers.ValidationError:
+            raise
         except Exception as e:
             logger.error(f"Error validating product image: {str(e)}", exc_info=True)
             raise serializers.ValidationError("Invalid product image file.")
@@ -283,6 +298,8 @@ class ProductImageSerializer(SanitizedModelSerializer):
     def validate_image(self, value):
         try:
             return validate_image_file(value)
+        except serializers.ValidationError:
+            raise
         except Exception as e:
             logger.error(f"Error validating product image: {str(e)}", exc_info=True)
             raise serializers.ValidationError("Invalid image file.")

@@ -1,13 +1,4 @@
-"""
-Product-specific signal handlers.
 
-Cache invalidation for Product save/delete lives in core/signals.py
-to keep a single source of truth. This module only handles side effects
-that are PRODUCT-app specific:
-  - Gallery image cache busts on ProductImage add/remove
-  - Spec cache busts on ProductSpecification add/remove
-  - Optional secondary Elasticsearch sync (gated by USE_ELASTICSEARCH)
-"""
 from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
 from django.conf import settings
