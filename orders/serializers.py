@@ -1,6 +1,9 @@
+import logging
 from rest_framework import serializers
 from core.utils.serializers import SanitizedModelSerializer
 from .models import CustomerRequest, Enquiry
+
+logger = logging.getLogger(__name__)
 
 class CustomerRequestSerializer(SanitizedModelSerializer):
     class Meta:
@@ -12,10 +15,14 @@ class CustomerRequestSerializer(SanitizedModelSerializer):
         read_only_fields = ["status", "created_at", "updated_at"]
 
     def validate_phone(self, value):
-        normalized = "".join(ch for ch in value if ch.isdigit())
-        if len(normalized) < 10 or len(normalized) > 15:
-            raise serializers.ValidationError("Enter a valid phone number.")
-        return normalized
+        try:
+            normalized = "".join(ch for ch in value if ch.isdigit())
+            if len(normalized) < 10 or len(normalized) > 15:
+                raise serializers.ValidationError("Enter a valid phone number.")
+            return normalized
+        except Exception as e:
+            logger.error(f"Error validating phone number: {str(e)}")
+            raise serializers.ValidationError("Invalid phone number format.")
 
 class CustomerRequestStatusSerializer(serializers.ModelSerializer):
     class Meta:
@@ -23,10 +30,14 @@ class CustomerRequestStatusSerializer(serializers.ModelSerializer):
         fields = ["status"]
 
     def validate_status(self, value):
-        valid = {choice[0] for choice in CustomerRequest.STATUS_CHOICES}
-        if value not in valid:
-            raise serializers.ValidationError("Invalid status value.")
-        return value
+        try:
+            valid = {choice[0] for choice in CustomerRequest.STATUS_CHOICES}
+            if value not in valid:
+                raise serializers.ValidationError("Invalid status value.")
+            return value
+        except Exception as e:
+            logger.error(f"Error validating status: {str(e)}")
+            raise serializers.ValidationError("Invalid status.")
 
 class EnquirySerializer(SanitizedModelSerializer):
     class Meta:
@@ -48,25 +59,41 @@ class EnquirySerializer(SanitizedModelSerializer):
         }
 
     def validate_name(self, value):
-        value = value.strip()
-        if not value:
-            raise serializers.ValidationError("Name is required.")
-        return value
+        try:
+            value = value.strip()
+            if not value:
+                raise serializers.ValidationError("Name is required.")
+            return value
+        except Exception as e:
+            logger.error(f"Error validating name: {str(e)}")
+            raise serializers.ValidationError("Invalid name.")
 
     def validate_phone(self, value):
-        normalized = "".join(ch for ch in value if ch.isdigit())
-        if len(normalized) < 10 or len(normalized) > 15:
-            raise serializers.ValidationError("Enter a valid phone number.")
-        return normalized
+        try:
+            normalized = "".join(ch for ch in value if ch.isdigit())
+            if len(normalized) < 10 or len(normalized) > 15:
+                raise serializers.ValidationError("Enter a valid phone number.")
+            return normalized
+        except Exception as e:
+            logger.error(f"Error validating phone number: {str(e)}")
+            raise serializers.ValidationError("Invalid phone number format.")
 
     def validate_company_name(self, value):
-        value = value.strip()
-        if not value:
-            raise serializers.ValidationError("Company name is required.")
-        return value
+        try:
+            value = value.strip()
+            if not value:
+                raise serializers.ValidationError("Company name is required.")
+            return value
+        except Exception as e:
+            logger.error(f"Error validating company name: {str(e)}")
+            raise serializers.ValidationError("Invalid company name.")
 
     def validate_company_address(self, value):
-        value = value.strip()
-        if not value:
-            raise serializers.ValidationError("Company address is required.")
-        return value
+        try:
+            value = value.strip()
+            if not value:
+                raise serializers.ValidationError("Company address is required.")
+            return value
+        except Exception as e:
+            logger.error(f"Error validating company address: {str(e)}")
+            raise serializers.ValidationError("Invalid company address.")

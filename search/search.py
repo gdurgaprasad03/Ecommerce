@@ -142,13 +142,14 @@ class ElasticsearchSearchManager:
             response = s.execute()
 
             product_ids = [hit.meta.id for hit in response]
+            logger.debug(f"Elasticsearch search completed: query='{query_string}', results={len(product_ids)}")
             return {
                 'ids': product_ids,
                 'total': response.hits.total.value,
                 'took': response.took,
             }
         except Exception as e:
-            logger.warning(f"Elasticsearch search failed: {str(e)}")
+            logger.error(f"Elasticsearch search failed for query '{query_string}': {str(e)}", exc_info=True)
             return None
 
     @staticmethod
@@ -173,12 +174,17 @@ class ElasticsearchSearchManager:
                         })
             return suggestions[:limit]
         except Exception as e:
-            from products.models import Product
-            suggestions = Product.objects.filter(
-                name__istartswith=prefix,
-                is_active=True
-            ).values_list('name', flat=True)[:limit]
-            return [{'text': s, 'score': 1.0} for s in suggestions]
+            logger.warning(f"Elasticsearch autocomplete failed: {str(e)}, falling back to database")
+            try:
+                from products.models import Product
+                suggestions = Product.objects.filter(
+                    name__istartswith=prefix,
+                    is_active=True
+                ).values_list('name', flat=True)[:limit]
+                return [{'text': s, 'score': 1.0} for s in suggestions]
+            except Exception as db_error:
+                logger.error(f"Autocomplete database fallback failed: {str(db_error)}")
+                return []
 
     @staticmethod
     def get_facets():
@@ -195,9 +201,10 @@ class ElasticsearchSearchManager:
                 'brands': [{'name': brand.key, 'count': brand.doc_count} for brand in response.aggregations.brands.buckets],
                 'ratings': [{'rating': rating.key, 'count': rating.doc_count} for rating in response.aggregations.ratings.buckets],
             }
+            logger.debug(f"Retrieved facets successfully")
             return facets
         except Exception as e:
-            logger.error(f"Faceting error: {str(e)}")
+            logger.error(f"Error fetching facets: {str(e)}", exc_info=True)
             return {}
 
     @staticmethod
@@ -206,8 +213,10 @@ class ElasticsearchSearchManager:
             doc = ProductDocument()
             doc.meta.id = product.id
             doc.save()
+            logger.debug(f"Product {product.id} indexed successfully")
             return True
         except Exception as e:
+            logger.error(f"Error indexing product {product.id}: {str(e)}", exc_info=True)
             return False
 
     @staticmethod
@@ -216,8 +225,10 @@ class ElasticsearchSearchManager:
             doc = ProductDocument()
             doc.meta.id = product_id
             doc.delete()
+            logger.debug(f"Product {product_id} deleted from index")
             return True
         except Exception as e:
+            logger.warning(f"Error deleting product {product_id} from index: {str(e)}")
             return False
 
     @staticmethod
@@ -227,8 +238,12 @@ class ElasticsearchSearchManager:
             ProductDocument._index.delete(ignore=404)
             ProductDocument._index.create()
             products = Product.objects.filter(is_active=True)
+            indexed_count = 0
             for product in products:
-                ElasticsearchSearchManager.index_product(product)
+                if ElasticsearchSearchManager.index_product(product):
+                    indexed_count += 1
+            logger.info(f"Reindexed {indexed_count} products in Elasticsearch")
             return True
         except Exception as e:
+            logger.error(f"Error during full reindex: {str(e)}", exc_info=True)
             return False

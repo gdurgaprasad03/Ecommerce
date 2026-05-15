@@ -1,16 +1,14 @@
-"""
-ASGI config for com project.
-
-It exposes the ASGI callable as a module-level variable named ``application``.
-
-For more information on this file, see
-https://docs.djangoproject.com/en/6.0/howto/deployment/asgi/
-"""
-
 import os
+import logging
 
-from django.core.asgi import get_asgi_application
+from django.asgi import get_asgi_application
+
+logger = logging.getLogger(__name__)
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
 
-application = get_asgi_application()
+try:
+    application = get_asgi_application()
+except Exception as e:
+    logger.error(f"Failed to initialize ASGI application: {str(e)}")
+    raise

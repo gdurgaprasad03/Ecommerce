@@ -1,6 +1,9 @@
+import logging
 from rest_framework import serializers
 from core.utils.serializers import SanitizedModelSerializer
 from .models import ProductReview
+
+logger = logging.getLogger(__name__)
 
 class ProductReviewSerializer(SanitizedModelSerializer):
     username = serializers.CharField(source="user.username", read_only=True)
@@ -12,6 +15,13 @@ class ProductReviewSerializer(SanitizedModelSerializer):
         read_only_fields = ["id", "helpful_count", "is_verified", "created_at", "updated_at"]
 
     def validate_rating(self, value):
-        if value < 1 or value > 5:
-            raise serializers.ValidationError("Rating must be between 1 and 5.")
-        return value
+        try:
+            if value < 1 or value > 5:
+                raise serializers.ValidationError("Rating must be between 1 and 5.")
+            return value
+        except serializers.ValidationError:
+            raise
+        except Exception as e:
+            logger.error(f"Error validating rating: {str(e)}", exc_info=True)
+            raise serializers.ValidationError("Invalid rating value.")
+
