@@ -71,7 +71,6 @@ class ProductSerializer(SanitizedModelSerializer):
         required=False,
         write_only=True,
     )
-    
 
     class Meta:
         model = Product
@@ -83,15 +82,12 @@ class ProductSerializer(SanitizedModelSerializer):
             "images", "uploaded_images",
             "created_at", "updated_at",
         ]
-        # is_active is now writable. Public read access is filtered at the view layer.
         read_only_fields = [
             "id", "category_name", "subcategory_name", "brand_name",
             "images", "created_at", "updated_at",
         ]
 
     def get_images(self, obj):
-        """Single combined list: the main `product_image` is the first entry
-        (marked `is_main: true`), followed by all gallery ProductImage rows."""
         request = self.context.get("request")
 
         def absolute(url):
@@ -116,74 +112,53 @@ class ProductSerializer(SanitizedModelSerializer):
     def to_representation(self, instance):
         representation = super().to_representation(instance)
 
-        # Use prefetched related products if available to avoid extra DB queries
         if "related_products" in representation:
-            # We filter in-memory if already prefetched, or fallback to DB if not
             related_products = getattr(instance, "active_related_products", None)
             if related_products is None:
                 related_products = instance.related_products.filter(is_active=True)
             representation["related_products"] = ProductMinimalSerializer(related_products, many=True).data
-        
+
         if "frequently_bought_together" in representation:
             fbt_products = getattr(instance, "active_fbt_products", None)
             if fbt_products is None:
                 fbt_products = instance.frequently_bought_together.filter(is_active=True)
             representation["frequently_bought_together"] = ProductMinimalSerializer(fbt_products, many=True).data
-        
+
         frontend_url = getattr(settings, "FRONTEND_BASE_URL", "http://localhost:5173")
         product_url = f"{frontend_url}/products/{instance.id}"
         message = f"Hey, check out this {instance.name} on our site! {product_url}"
         representation["whatsapp_share_link"] = f"https://wa.me/?text={urlencode({'': message})[1:]}"
-        
-        # SEO Meta Tags
+
         representation["meta_title"] = f"{instance.name} | Buy {instance.category.name if instance.category else 'Products'} Online"
         desc = instance.description or ""
         representation["meta_description"] = (desc[:157] + "...") if len(desc) > 160 else desc
-        
+
         return representation
 
     def validate_product_image(self, value):
         return validate_image_file(value)
 
     def validate_sku(self, value):
-        """
-        Normalize SKU field:
-        - Convert empty strings to None (NULL in DB)
-        - Strip whitespace from non-empty values
-        - Ensure only non-empty SKUs are saved
-        
-        This prevents duplicate empty string issues with the unique constraint.
-        PostgreSQL treats multiple empty strings as violating unique constraint,
-        but NULL values are allowed to repeat.
-        """
-        # Handle None
         if value is None:
             return None
-        
-        # Convert to string and strip whitespace
+
         value = str(value).strip() if value else ""
-        
-        # If empty after stripping, convert to None (NULL in DB)
+
         if not value:
             return None
-        
-        # Check uniqueness only for non-empty values
+
         existing = Product.objects.filter(sku=value).exclude(
             pk=self.instance.pk if self.instance else None
         ).exists()
-        
+
         if existing:
             raise serializers.ValidationError(
                 "A product with this SKU already exists. SKU must be unique."
             )
-        
+
         return value
 
     def to_internal_value(self, data):
-        # QueryDict.copy() does a deepcopy under the hood, which raises
-        # `TypeError: cannot pickle 'BufferedRandom' instances` once the
-        # request contains uploaded files (e.g. uploaded_images). Build a
-        # shallow mutable copy that reuses the file references instead.
         from django.http import QueryDict
         if isinstance(data, QueryDict):
             shallow = QueryDict(mutable=True)
@@ -193,42 +168,30 @@ class ProductSerializer(SanitizedModelSerializer):
         else:
             data = {**data}
 
-        # Normalize SKU before validation: convert empty strings to None
         if "sku" in data:
             sku_value = data.get("sku", "")
             if isinstance(sku_value, str):
                 sku_value = sku_value.strip()
             data["sku"] = sku_value if sku_value else None
 
-        # Handle foreign key fields that might be dict objects
         for field in ["category", "subcategory", "brand"]:
             if field in data and isinstance(data[field], dict) and "id" in data[field]:
                 data[field] = data[field]["id"]
 
-        # Remove product_image if it's a string (already uploaded URL)
         val = data.get("product_image")
         if isinstance(val, str):
             data.pop("product_image", None)
 
         return super().to_internal_value(data)
-    
-    def _save_gallery_images(self, product, files):
-        """Append each uploaded file as a new ProductImage row.
 
-        Uses .create() rather than .bulk_create() so the post_save signal
-        fires for each row and the gallery cache is dropped.
-        """
+    def _save_gallery_images(self, product, files):
         if not files:
             return
         for f in files:
             ProductImage.objects.create(product=product, image=f)
 
     def create(self, validated_data):
-        """
-        Ensure SKU is None (not empty string) before saving to prevent unique constraint violation.
-        """
         uploaded_images = validated_data.pop("uploaded_images", [])
-        # Double-check SKU is None, not empty string
         if validated_data.get("sku") == "":
             validated_data["sku"] = None
 
@@ -237,16 +200,11 @@ class ProductSerializer(SanitizedModelSerializer):
         return product
 
     def update(self, instance, validated_data):
-        """
-        Ensure SKU is None (not empty string) before saving to prevent unique constraint violation.
-        """
         uploaded_images = validated_data.pop("uploaded_images", [])
-        # Double-check SKU is None, not empty string
         if validated_data.get("sku") == "":
             validated_data["sku"] = None
 
         product = super().update(instance, validated_data)
-        # Append-only: existing gallery images are preserved.
         self._save_gallery_images(product, uploaded_images)
         return product
 

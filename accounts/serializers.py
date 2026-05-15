@@ -1,6 +1,5 @@
 from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password as django_validate_password
-from django.utils.html import escape
 from rest_framework import serializers
 import re
 from core.utils.serializers import SanitizedModelSerializer
@@ -55,12 +54,14 @@ class CustomerRegistrationSerializer(SanitizedModelSerializer):
         return value
 
     def validate_company_name(self, value):
-        """Sanitize company name"""
-        return escape(value.strip())
+        """Sanitize company name (rely on parent SanitizedModelSerializer to
+        strip tags; do NOT html-escape here, otherwise `Tom & Jerry` would
+        be stored as `Tom &amp; Jerry`)."""
+        return value.strip()
 
     def validate_company_address(self, value):
-        """Sanitize company address"""
-        return escape(value.strip())
+        """Sanitize company address (see note on validate_company_name)."""
+        return value.strip()
 
     def validate(self, attrs):
         email = attrs["email"].strip().lower()
