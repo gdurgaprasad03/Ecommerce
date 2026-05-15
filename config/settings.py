@@ -25,9 +25,6 @@ from dotenv import load_dotenv
 import dj_database_url
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 def get_local_ip():
     """Detect the LAN IP for cross-laptop frontend/backend testing."""
@@ -48,9 +45,6 @@ load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
-# ---------------------------------------------------------------------------
-# Core security
-# ---------------------------------------------------------------------------
 
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY")
 if not SECRET_KEY or SECRET_KEY == "REPLACE_WITH_STRONG_SECRET_KEY_50_CHARS_MIN":
@@ -63,7 +57,6 @@ if not SECRET_KEY or SECRET_KEY == "REPLACE_WITH_STRONG_SECRET_KEY_50_CHARS_MIN"
 
 DEBUG = os.getenv("DJANGO_DEBUG", "False").lower() in ["true", "1"]
 
-# In DEBUG, allow LAN testing across multiple laptops. "*" alone is enough.
 if DEBUG:
     ALLOWED_HOSTS = ["*"]
 else:
@@ -108,9 +101,6 @@ else:
     ]
 
 
-# ---------------------------------------------------------------------------
-# Apps
-# ---------------------------------------------------------------------------
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -146,14 +136,9 @@ INSTALLED_APPS.extend([
 ])
 
 
-# ---------------------------------------------------------------------------
-# Middleware
-# ---------------------------------------------------------------------------
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
-    # WhiteNoise must come right after SecurityMiddleware so it can serve
-    # collected static files directly from gunicorn without an extra nginx.
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -184,9 +169,6 @@ TEMPLATES = [
 WSGI_APPLICATION = "config.wsgi.application"
 
 
-# ---------------------------------------------------------------------------
-# Database
-# ---------------------------------------------------------------------------
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
@@ -203,9 +185,6 @@ DATABASES = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Auth and DRF
-# ---------------------------------------------------------------------------
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
@@ -252,9 +231,6 @@ SIMPLE_JWT = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Locale, static, media
-# ---------------------------------------------------------------------------
 
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = os.getenv("DJANGO_TIME_ZONE", "Asia/Kolkata")
@@ -274,15 +250,11 @@ CLOUDINARY_STORAGE = {
     "SECURE": True,
 }
 
-# Modern Django storages config (Django 4.2+).
-# Removed legacy DEFAULT_FILE_STORAGE — STORAGES dict is the replacement.
 STORAGES = {
     "default": {
         "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage",
     },
     "staticfiles": {
-        # Compressed + cache-busting manifest. Falls back to plain
-        # StaticFilesStorage in DEBUG so missing files don't 500 in dev.
         "BACKEND": (
             "django.contrib.staticfiles.storage.StaticFilesStorage"
             if DEBUG
@@ -291,22 +263,14 @@ STORAGES = {
     },
 }
 
-# For backward compatibility with third-party apps like django-cloudinary-storage
 DEFAULT_FILE_STORAGE = STORAGES["default"]["BACKEND"]
 STATICFILES_STORAGE = STORAGES["staticfiles"]["BACKEND"]
 
 
-# ---------------------------------------------------------------------------
-# Email
-# ---------------------------------------------------------------------------
 
 EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
 
-# Clean email backend resolution:
-# - DEBUG without SMTP creds  -> console (prints emails to terminal)
-# - DEBUG with SMTP creds      -> SMTP (or whatever EMAIL_BACKEND env says)
-# - Production                 -> CeleryEmailBackend (or whatever EMAIL_BACKEND env says)
 if DEBUG and not EMAIL_HOST_USER:
     EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 elif DEBUG:
@@ -337,18 +301,12 @@ EMAIL_MAX_RETRIES = int(os.getenv("EMAIL_MAX_RETRIES", "3"))
 FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", f"http://{LOCAL_IP}:5173")
 
 
-# ---------------------------------------------------------------------------
-# OTP
-# ---------------------------------------------------------------------------
 
 OTP_EXPIRY_MINUTES = int(os.getenv("OTP_EXPIRY_MINUTES", "10"))
 OTP_MAX_ATTEMPTS = int(os.getenv("OTP_MAX_ATTEMPTS", "5"))
 OTP_RESEND_COOLDOWN_SECONDS = int(os.getenv("OTP_RESEND_COOLDOWN_SECONDS", "60"))
 
 
-# ---------------------------------------------------------------------------
-# Cache
-# ---------------------------------------------------------------------------
 
 CACHES = {
     "default": {
@@ -371,16 +329,6 @@ CACHES = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Celery
-#
-# CRITICAL FIX: CELERY_TASK_ALWAYS_EAGER now defaults to False.
-# Previously this was hard-coded to True, which meant the running Celery
-# worker never received bulk-upload tasks — they ran in the request thread,
-# blocking the API response for 30+ seconds.
-#
-# To force eager mode (for unit tests), set the env var: CELERY_EAGER=True
-# ---------------------------------------------------------------------------
 
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://127.0.0.1:6379/1")
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://127.0.0.1:6379/2")
@@ -392,7 +340,6 @@ CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = 30 * 60
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 
-# Eager mode is OFF by default. Set CELERY_EAGER=True in env only for tests.
 CELERY_TASK_ALWAYS_EAGER = os.getenv("CELERY_EAGER", "False").lower() in ["true", "1"]
 CELERY_TASK_EAGER_PROPAGATES = CELERY_TASK_ALWAYS_EAGER
 
@@ -412,9 +359,6 @@ CELERY_BEAT_SCHEDULE = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Misc
-# ---------------------------------------------------------------------------
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
@@ -438,9 +382,6 @@ ANALYTICS_CACHE_TIMEOUT = int(os.getenv("ANALYTICS_CACHE_TIMEOUT", "3600"))
 ENABLE_ANALYTICS = os.getenv("ENABLE_ANALYTICS", "True").lower() in ["true", "1"]
 
 
-# ---------------------------------------------------------------------------
-# Security headers
-# ---------------------------------------------------------------------------
 
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
@@ -462,18 +403,12 @@ else:
     SECURE_HSTS_SECONDS = 0
 
 
-# ---------------------------------------------------------------------------
-# Logging
-# ---------------------------------------------------------------------------
 
 LOGS_DIR = BASE_DIR / "logs"
 LOGS_DIR.mkdir(exist_ok=True)
 
-# Prefer the multi-process safe handler in production; fall back to the
-# stdlib RotatingFileHandler if concurrent-log-handler isn't installed
-# (e.g. in a minimal dev venv). Both share the same constructor kwargs.
 try:
-    import concurrent_log_handler  # noqa: F401
+    import concurrent_log_handler
     _FILE_HANDLER_CLASS = "concurrent_log_handler.ConcurrentRotatingFileHandler"
 except ImportError:
     _FILE_HANDLER_CLASS = "logging.handlers.RotatingFileHandler"

@@ -24,7 +24,6 @@ from .services import BulkProductUploadService
 logger = logging.getLogger(__name__)
 
 
-# ---------- Brand ----------
 
 class BrandAPIView(PaginatedAPIView):
     def get_permissions(self):
@@ -75,7 +74,6 @@ class BrandDetailAPIView(APIView):
             )
 
 
-# ---------- Category ----------
 
 class CategoryAPIView(PaginatedAPIView):
     def get_permissions(self):
@@ -162,7 +160,6 @@ class SubCategoryAPIView(APIView):
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
-# ---------- Product ----------
 
 class ProductAPIView(PaginatedAPIView):
     parser_classes = [MultiPartParser, FormParser]
@@ -172,7 +169,7 @@ class ProductAPIView(PaginatedAPIView):
             return [AllowAny()]
         return [IsAdminUser()]
 
-    @cache_product_list(timeout=300)  # 5 minutes cache for public users, no cache for admins
+    @cache_product_list(timeout=300)
     def get(self, request):
         include_inactive = (
             request.user.is_authenticated
@@ -202,7 +199,6 @@ class ProductAPIView(PaginatedAPIView):
         if not include_inactive:
             queryset = queryset.filter(is_active=True)
 
-        # Filters
         if request.query_params.get("top_selling", "").lower() == "true":
             queryset = queryset.filter(top_selling=True)
         if request.query_params.get("featured", "").lower() == "true":
@@ -219,9 +215,6 @@ class ProductAPIView(PaginatedAPIView):
 
         response = self.paginate(request, queryset, ProductSerializer)
 
-        # Admins must never see a cached/stale list. Tell upstream proxies
-        # and the browser not to cache the admin variant. Public users still
-        # go through @cache_product_list which handles TTL.
         if request.user.is_authenticated and request.user.is_staff:
             response["Cache-Control"] = "no-store, no-cache, must-revalidate"
             response["Pragma"] = "no-cache"
@@ -245,7 +238,7 @@ class ProductDetailAPIView(APIView):
             return [AllowAny()]
         return [IsAdminUser()]
 
-    @cache_product_detail(timeout=300)  # 5 minutes cache for public users, no cache for admins
+    @cache_product_detail(timeout=300)
     def get(self, request, pk):
         queryset = Product.objects.select_related(
             "brand", "category", "subcategory"
@@ -303,7 +296,7 @@ class ProductDetailAPIView(APIView):
         Doing it inline guarantees the next list GET sees fresh data.
         """
         product = get_object_or_404(Product, pk=pk)
-        product_id = product.id  # capture before .delete() invalidates the instance
+        product_id = product.id
 
         try:
             product.delete()
@@ -316,8 +309,6 @@ class ProductDetailAPIView(APIView):
                 status=status.HTTP_409_CONFLICT,
             )
 
-        # Explicit cache wipe — runs in the request thread, not async.
-        # Redis DELs are sub-millisecond; total overhead < 5ms typical.
         from core.cache_utils import CacheManager
         try:
             CacheManager.clear_product_cache(product_id)
@@ -473,7 +464,6 @@ class SimilarProductsAPIView(APIView):
         })
 
 
-# ---------- Product Image ----------
 
 class ProductImageListAPIView(PaginatedAPIView):
     parser_classes = [MultiPartParser, FormParser]
@@ -527,7 +517,6 @@ class ProductImageDetailAPIView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-# ---------- Product Specification ----------
 
 class ProductSpecificationListAPIView(PaginatedAPIView):
     def get_permissions(self):
@@ -577,7 +566,6 @@ class ProductSpecificationDetailAPIView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-# ---------- Bulk Upload ----------
 
 class BulkProductUploadAPIView(APIView):
     parser_classes = [MultiPartParser, FormParser]

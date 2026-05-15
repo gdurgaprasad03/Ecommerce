@@ -273,7 +273,6 @@ def check_stock_alerts(self):
 
         product_ids = [p.id for p in low_stock_products]
 
-        # One query for all wishlists touching any low-stock product.
         rows = Wishlist.objects.filter(
             products__id__in=product_ids
         ).values_list("products__id", "user__email")

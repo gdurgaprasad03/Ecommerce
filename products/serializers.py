@@ -215,6 +215,8 @@ class ProductSerializer(SanitizedModelSerializer):
                 data.pop("product_image", None)
 
             return super().to_internal_value(data)
+        except serializers.ValidationError:
+            raise
         except Exception as e:
             logger.error(f"Error processing product data: {str(e)}", exc_info=True)
             raise serializers.ValidationError({"detail": "Error processing product data."})
@@ -238,6 +240,8 @@ class ProductSerializer(SanitizedModelSerializer):
             self._save_gallery_images(product, uploaded_images)
             logger.info(f"Product created successfully: {product.id}")
             return product
+        except serializers.ValidationError:
+            raise
         except Exception as e:
             logger.error(f"Error creating product: {str(e)}", exc_info=True)
             raise serializers.ValidationError({"detail": "Error creating product."})
@@ -252,6 +256,8 @@ class ProductSerializer(SanitizedModelSerializer):
             self._save_gallery_images(product, uploaded_images)
             logger.info(f"Product updated successfully: {product.id}")
             return product
+        except serializers.ValidationError:
+            raise
         except Exception as e:
             logger.error(f"Error updating product {instance.id}: {str(e)}", exc_info=True)
             raise serializers.ValidationError({"detail": "Error updating product."})

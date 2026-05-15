@@ -18,7 +18,6 @@ from .models import Brand, Category, Product, ProductImage, ProductSpecification
 logger = logging.getLogger("bulk_upload")
 
 
-# ---------- Helpers ----------
 
 def clean_str(value, default=None):
     if value is None:
@@ -92,7 +91,6 @@ def get_full_product_data(product):
     return data
 
 
-# ---------- Service ----------
 
 class BulkProductUploadService:
     REQUIRED_COLUMNS = ["product_name", "category", "sku", "description"]
@@ -122,7 +120,6 @@ class BulkProductUploadService:
         self.start_time = time.time()
         self._url_validation_cache = {}
 
-    # ---- Validation & reading ----
 
     def validate_excel_file(self):
         if not self.excel_file.name.lower().endswith((".xlsx", ".xls")):
@@ -155,7 +152,6 @@ class BulkProductUploadService:
             )
         return df
 
-    # ---- URL validation (sync, fast) ----
 
     @classmethod
     def validate_image_url(cls, url):
@@ -173,7 +169,6 @@ class BulkProductUploadService:
                 return False, f"HTTP {response.status_code}"
             content_type = response.headers.get("Content-Type", "").lower()
             if not content_type.startswith("image/"):
-                # Some CDNs reject HEAD or omit Content-Type; try GET range
                 response = requests.get(
                     url,
                     timeout=cls.URL_VALIDATION_TIMEOUT_SECONDS,
@@ -198,7 +193,6 @@ class BulkProductUploadService:
         self._url_validation_cache[url] = result
         return result
 
-    # ---- Image download (used by Celery + main image) ----
 
     @classmethod
     def download_image_from_url(cls, image_url):
@@ -318,7 +312,6 @@ class BulkProductUploadService:
             None,
         )
 
-    # ---- Other parsers ----
 
     @staticmethod
     def parse_specifications(spec_string):
@@ -371,7 +364,6 @@ class BulkProductUploadService:
             logger.warning(f"Error with brand '{brand_name}': {e}")
             return None
 
-    # ---- Row processing ----
 
     def _build_product_in_transaction(self, row, row_num):
         with transaction.atomic():
@@ -403,8 +395,6 @@ class BulkProductUploadService:
                 is_active=parse_boolean(row.get("is_active"), default=True),
             )
 
-            # Main image
-            # Main image — fall back to image_1 if product_image/image columns aren't present
             main_image_ref = (
                 clean_str(row.get("product_image"))
                 or clean_str(row.get("image"))
@@ -432,12 +422,9 @@ class BulkProductUploadService:
                         self.warnings.append(msg)
                         logger.warning(msg)
 
-            # Inventory
             stock = parse_int(row.get("stock"), default=0)
             Inventory.objects.create(product=product, stock=stock)
 
-            # Additional images
-            # Additional images (skip image already used as main to avoid duplicate)
             image_columns = [c for c in row.index if str(c).startswith("image_")]
             urls_to_download = []
             urls_failed = []
@@ -445,7 +432,6 @@ class BulkProductUploadService:
                 ref = clean_str(row.get(col))
                 if not ref:
                     continue
-                # Skip if already used as the main image (avoids duplicate upload)
                 if ref == main_image_ref:
                     continue
                 if ref.lower().startswith(("http://", "https://")):
@@ -473,7 +459,6 @@ class BulkProductUploadService:
                 self.warnings.append(msg)
                 logger.warning(msg)
 
-            # Specifications
             spec_columns = [c for c in row.index if str(c).startswith("specs_")]
             for col in spec_columns:
                 specs_string = clean_str(row.get(col))
@@ -522,7 +507,6 @@ class BulkProductUploadService:
             logger.warning(f"Could not serialize created product {product.id}: {e}")
         return True, None
 
-    # ---- Entry point ----
 
     def upload(self):
         try:

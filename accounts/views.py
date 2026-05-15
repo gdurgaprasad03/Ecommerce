@@ -42,8 +42,6 @@ class CustomerRegistrationAPIView(APIView):
         company_address = validated_data["company_address"].strip()
 
         with transaction.atomic():
-            # Lock the existing user row (if any) so two concurrent
-            # registrations for the same email don't race.
             user = (
                 User.objects.select_for_update()
                 .filter(email__iexact=email)
@@ -66,8 +64,6 @@ class CustomerRegistrationAPIView(APIView):
                 profile.save(update_fields=["company_name", "company_address", "updated_at"])
 
             else:
-                # create_user handles password hashing properly and
-                # is the documented public API.
                 user = User.objects.create_user(
                     username=username,
                     email=email,
@@ -200,7 +196,6 @@ class LoginAPIView(APIView):
         login_id = serializer.validated_data["login_id"]
         password = serializer.validated_data["password"]
 
-        # Resolve username up front so we only invoke the password hasher once.
         if "@" in login_id:
             user_obj = User.objects.filter(email__iexact=login_id).only("username").first()
             username_for_auth = user_obj.username if user_obj else login_id

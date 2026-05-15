@@ -26,7 +26,6 @@ def generate_cache_key(prefix, request, params_to_include=None):
 
     key_parts = []
 
-    # Include user authentication status
     if request.user.is_authenticated:
         key_parts.append(f"user_{request.user.id}")
         if request.user.is_staff:
@@ -34,17 +33,14 @@ def generate_cache_key(prefix, request, params_to_include=None):
     else:
         key_parts.append("anon")
 
-    # Include relevant query parameters
     for param in params_to_include:
         value = request.query_params.get(param, "")
         if value:
             key_parts.append(f"{param}_{value}")
 
-    # Create deterministic hash
     key_str = "|".join(key_parts)
     key_hash = hashlib.md5(key_str.encode()).hexdigest()
 
-    # IMPORTANT: leading `{prefix}:` so CacheManager.delete_pattern matches.
     return f"{prefix}:{key_hash}"
 
 
@@ -65,16 +61,13 @@ def cache_product_list(timeout=300):
     def decorator(view_func):
         @wraps(view_func)
         def wrapper(self, request, *args, **kwargs):
-            # Always skip cache for authenticated admin users (they need fresh data)
             if request.user.is_authenticated and request.user.is_staff:
                 logger.debug("Cache SKIPPED: Admin user - fetching fresh data")
                 return view_func(self, request, *args, **kwargs)
             
-            # Generate cache key based on query parameters
             relevant_params = ["category", "subcategory", "top_selling", "featured", "new_arrival"]
             cache_key = generate_cache_key("product_list", request, relevant_params)
             
-            # Try to get from cache
             cached_payload = cache.get(cache_key)
             if cached_payload is not None:
                 logger.debug(f"Cache HIT: {cache_key}")
@@ -82,11 +75,8 @@ def cache_product_list(timeout=300):
 
             logger.debug(f"Cache MISS: {cache_key} - querying database")
 
-            # Call the original view function
             response = view_func(self, request, *args, **kwargs)
 
-            # Cache the serialized data (not the Response itself — DRF Response
-            # objects can't be pickled until they're rendered).
             if response.status_code == 200:
                 try:
                     cache.set(cache_key, response.data, timeout)
@@ -113,17 +103,12 @@ def cache_product_detail(timeout=300):
         def wrapper(self, request, *args, **kwargs):
             pk = kwargs.get('pk')
             
-            # Always skip cache for authenticated admin users
             if request.user.is_authenticated and request.user.is_staff:
                 logger.debug(f"Cache SKIPPED: Admin user fetching product {pk}")
                 return view_func(self, request, *args, **kwargs)
             
-            # Key must start with `product:` so CacheManager.clear_product_cache(pk)
-            # — which deletes `product:{pk}` — can also be widened to a pattern
-            # delete (`product:{pk}:*`) by the signal handler below.
             cache_key = f"product:{pk}:public"
             
-            # Try to get from cache
             cached_payload = cache.get(cache_key)
             if cached_payload is not None:
                 logger.debug(f"Cache HIT: {cache_key}")
@@ -131,11 +116,8 @@ def cache_product_detail(timeout=300):
 
             logger.debug(f"Cache MISS: {cache_key} - querying database")
 
-            # Call the original view function
             response = view_func(self, request, *args, **kwargs)
 
-            # Cache the serialized data (not the Response itself — DRF Response
-            # objects can't be pickled until they're rendered).
             if response.status_code == 200:
                 try:
                     cache.set(cache_key, response.data, timeout)
@@ -152,8 +134,6 @@ def cache_product_detail(timeout=300):
 def clear_product_list_cache():
     """Clear all product list cache entries."""
     try:
-        # Note: We can't use delete_pattern reliably, so we rely on TTL expiration
-        # For admin-triggered updates, the signal handlers trigger this
         logger.info("Product list cache invalidation triggered")
     except Exception as e:
         logger.error(f"Error clearing product cache: {e}")
