@@ -15,6 +15,7 @@ app.config_from_object('django.conf:settings', namespace='CELERY')
 app.autodiscover_tasks()
 
 app.conf.task_routes = {
+    'core.tasks.send_otp_email_task': {'queue': 'emails'},
     'core.tasks.send_welcome_email': {'queue': 'emails'},
     'core.tasks.send_stock_alert_email': {'queue': 'emails'},
     'core.tasks.send_price_drop_email': {'queue': 'emails'},

@@ -250,27 +250,51 @@ def notify_stock_low(self, product_id):
 
 @shared_task(bind=True, max_retries=2)
 def check_stock_alerts(self):
-    """Periodic task to check and notify about back-in-stock items"""
+    """Periodic task to check and notify about back-in-stock items.
+
+    Uses a single grouped query instead of one Wishlist query per product
+    (N+1) so the cost stays bounded as the catalog grows.
+    """
     try:
+        from collections import defaultdict
         from products.models import Product
         from wishlist.models import Wishlist
 
-        low_stock_products = Product.objects.filter(
-            inventory__stock__gt=0,
-            inventory__stock__lte=5
+        low_stock_products = list(
+            Product.objects.filter(
+                inventory__stock__gt=0,
+                inventory__stock__lte=5,
+            ).only("id", "name")
         )
 
+        if not low_stock_products:
+            logger.info("Stock alert check completed. 0 products checked")
+            return "Stock alert check completed (no low stock)"
+
+        product_ids = [p.id for p in low_stock_products]
+
+        # One query for all wishlists touching any low-stock product.
+        rows = Wishlist.objects.filter(
+            products__id__in=product_ids
+        ).values_list("products__id", "user__email")
+
+        emails_by_product = defaultdict(set)
+        for product_id, email in rows:
+            if email:
+                emails_by_product[product_id].add(email)
+
+        dispatched = 0
         for product in low_stock_products:
+            recipients = emails_by_product.get(product.id)
+            if recipients:
+                send_stock_alert_email.delay(product.id, list(recipients))
+                dispatched += 1
 
-            wishlisted_users = Wishlist.objects.filter(
-                products=product
-            ).values_list("user__email", flat=True)
-
-            if wishlisted_users:
-                send_stock_alert_email.delay(product.id, list(wishlisted_users))
-
-        logger.info(f"Stock alert check completed. {len(low_stock_products)} products checked")
-        return f"Stock alert check completed"
+        logger.info(
+            f"Stock alert check completed. {len(low_stock_products)} products "
+            f"checked, {dispatched} alert batches dispatched"
+        )
+        return "Stock alert check completed"
 
     except Exception as exc:
         logger.error(f"Error in stock alert check: {str(exc)}")
@@ -335,6 +359,20 @@ def generate_analytics_snapshot():
     except Exception as exc:
         logger.error(f"Error generating analytics snapshot: {str(exc)}")
         return f"Error: {str(exc)}"
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=30)
+def send_otp_email_task(self, subject, message, recipient_list):
+    """Send OTP/transactional emails asynchronously so login/registration
+    requests return immediately instead of blocking on SMTP."""
+    from core.utils.helpers import safe_send_mail
+    try:
+        sent = safe_send_mail(subject, message, recipient_list)
+        if not sent:
+            raise RuntimeError("safe_send_mail returned False")
+        return f"OTP email sent to {recipient_list}"
+    except Exception as exc:
+        logger.error(f"OTP email failed for {recipient_list}: {exc}")
+        raise self.retry(exc=exc)
 
 @shared_task
 def clean_expired_otps():

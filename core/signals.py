@@ -24,7 +24,7 @@ def update_inventory_on_closed_request(sender, instance, **kwargs):
 
                 if inventory.stock >= instance.quantity:
                     inventory.stock -= instance.quantity
-                    inventory.save()
+                    inventory.save(update_fields=["stock"])
                     CustomerRequest.objects.filter(pk=instance.pk).update(stock_deducted=True)
                     logger.info(f"Inventory updated for {instance.product.name}: -{instance.quantity} units.")
                 else:

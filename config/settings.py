@@ -152,6 +152,9 @@ INSTALLED_APPS.extend([
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    # WhiteNoise must come right after SecurityMiddleware so it can serve
+    # collected static files directly from gunicorn without an extra nginx.
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -193,7 +196,7 @@ if not DATABASE_URL:
 DATABASES = {
     "default": dj_database_url.parse(
         DATABASE_URL,
-        conn_max_age=int(os.getenv("DB_CONN_MAX_AGE", "0")),
+        conn_max_age=int(os.getenv("DB_CONN_MAX_AGE", "60")),
         conn_health_checks=os.getenv("DB_CONN_HEALTH_CHECKS", "True").lower() in ["true", "1"],
         ssl_require=os.getenv("DB_SSL_REQUIRE", "True").lower() in ["true", "1"],
     )
@@ -278,7 +281,13 @@ STORAGES = {
         "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage",
     },
     "staticfiles": {
-        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+        # Compressed + cache-busting manifest. Falls back to plain
+        # StaticFilesStorage in DEBUG so missing files don't 500 in dev.
+        "BACKEND": (
+            "django.contrib.staticfiles.storage.StaticFilesStorage"
+            if DEBUG
+            else "whitenoise.storage.CompressedManifestStaticFilesStorage"
+        ),
     },
 }
 
@@ -460,6 +469,15 @@ else:
 LOGS_DIR = BASE_DIR / "logs"
 LOGS_DIR.mkdir(exist_ok=True)
 
+# Prefer the multi-process safe handler in production; fall back to the
+# stdlib RotatingFileHandler if concurrent-log-handler isn't installed
+# (e.g. in a minimal dev venv). Both share the same constructor kwargs.
+try:
+    import concurrent_log_handler  # noqa: F401
+    _FILE_HANDLER_CLASS = "concurrent_log_handler.ConcurrentRotatingFileHandler"
+except ImportError:
+    _FILE_HANDLER_CLASS = "logging.handlers.RotatingFileHandler"
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -480,8 +498,8 @@ LOGGING = {
         },
         "file": {
             "level": "WARNING",
-            "class": "logging.handlers.RotatingFileHandler",
-            "filename": LOGS_DIR / "django.log",
+            "class": _FILE_HANDLER_CLASS,
+            "filename": str(LOGS_DIR / "django.log"),
             "maxBytes": 1024 * 1024 * 10,
             "backupCount": 5,
             "formatter": "verbose",

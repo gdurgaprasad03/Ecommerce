@@ -7,4 +7,21 @@ db.sqlite3
 __pycache__/
 *.py[cod]
 *.log
+logs/
 staticfiles/
+media/
+
+# Celery beat state — created at runtime, never commit
+celerybeat-schedule
+celerybeat-schedule-*
+
+# Virtualenvs and IDE
+.venv/
+venv/
+env/
+.vscode/
+.idea/
+
+# OS clutter
+Thumbs.db
+.DS_Store

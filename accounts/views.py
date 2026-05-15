@@ -1,11 +1,8 @@
 import logging
-import secrets
 from datetime import timedelta
 from django.conf import settings
 from django.contrib.auth import authenticate
-from django.contrib.auth.hashers import make_password
 from django.contrib.auth.models import User
-from django.core.cache import cache
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import status
@@ -20,7 +17,8 @@ from .serializers import (
     CustomerRegistrationSerializer, LoginSerializer, OTPResendSerializer,
     OTPVerifySerializer, PasswordResetConfirmSerializer, PasswordResetRequestSerializer
 )
-from core.utils.helpers import safe_send_mail, build_reset_text, generate_otp
+from core.utils.helpers import build_reset_text, generate_otp
+from core.tasks import send_otp_email_task
 
 logger = logging.getLogger(__name__)
 
@@ -44,38 +42,53 @@ class CustomerRegistrationAPIView(APIView):
         company_address = validated_data["company_address"].strip()
 
         with transaction.atomic():
-            user = User.objects.filter(email__iexact=email).first()
+            # Lock the existing user row (if any) so two concurrent
+            # registrations for the same email don't race.
+            user = (
+                User.objects.select_for_update()
+                .filter(email__iexact=email)
+                .first()
+            )
 
             if user:
                 if user.is_active:
                     return Response({"error": "User with this email already exists."}, status=status.HTTP_400_BAD_REQUEST)
 
                 user.username = username
-                user.password = make_password(validated_data["password"])
+                user.set_password(validated_data["password"])
                 user.first_name = validated_data.get("first_name", "").strip()
                 user.last_name = validated_data.get("last_name", "").strip()
-                user.save()
+                user.save(update_fields=["username", "password", "first_name", "last_name"])
 
                 profile, _ = CustomerProfile.objects.get_or_create(user=user)
                 profile.company_name = company_name
                 profile.company_address = company_address
-                profile.save()
+                profile.save(update_fields=["company_name", "company_address", "updated_at"])
 
             else:
-                user = User.objects.create(
-                    email=email, username=username, password=make_password(validated_data["password"]),
+                # create_user handles password hashing properly and
+                # is the documented public API.
+                user = User.objects.create_user(
+                    username=username,
+                    email=email,
+                    password=validated_data["password"],
                     first_name=validated_data.get("first_name", "").strip(),
                     last_name=validated_data.get("last_name", "").strip(),
-                    is_active=False,
                 )
+                user.is_active = False
+                user.save(update_fields=["is_active"])
 
                 CustomerProfile.objects.create(user=user, company_name=company_name, company_address=company_address)
 
-            otp_verification, created_ov = OTPVerification.objects.get_or_create(
-                user=user, defaults={"otp": generate_otp(), "expires_at": timezone.now() + timedelta(minutes=OTP_EXPIRY_MINUTES)}
+            now = timezone.now()
+            otp_verification, created_ov = OTPVerification.objects.select_for_update().get_or_create(
+                user=user,
+                defaults={
+                    "otp": generate_otp(),
+                    "expires_at": now + timedelta(minutes=OTP_EXPIRY_MINUTES),
+                },
             )
 
-            now = timezone.now()
             if not created_ov:
                 if (now - otp_verification.last_sent_at).total_seconds() < OTP_RESEND_COOLDOWN_SECONDS:
                     return Response({"error": f"Please wait {OTP_RESEND_COOLDOWN_SECONDS} seconds before requesting another OTP."}, status=status.HTTP_429_TOO_MANY_REQUESTS)
@@ -88,7 +101,12 @@ class CustomerRegistrationAPIView(APIView):
                 otp_verification.save()
 
             otp = otp_verification.otp
-            safe_send_mail("Your OTP for Registration", f"Your OTP is {otp}. It expires in {OTP_EXPIRY_MINUTES} minutes.", [email])
+
+        send_otp_email_task.delay(
+            "Your OTP for Registration",
+            f"Your OTP is {otp}. It expires in {OTP_EXPIRY_MINUTES} minutes.",
+            [email],
+        )
 
         return Response({"message": "Registration successful. Please verify the OTP sent to your email."}, status=status.HTTP_201_CREATED)
 
@@ -163,7 +181,11 @@ class ResendOTPAPIView(APIView):
         otp_verification.is_verified = False
         otp_verification.save()
 
-        safe_send_mail("Your New OTP for Registration", f"Your OTP is {otp}. It expires in {OTP_EXPIRY_MINUTES} minutes.", [email])
+        send_otp_email_task.delay(
+            "Your New OTP for Registration",
+            f"Your OTP is {otp}. It expires in {OTP_EXPIRY_MINUTES} minutes.",
+            [email],
+        )
         return Response({"message": "A new OTP has been sent to your email."}, status=status.HTTP_200_OK)
 
 class LoginAPIView(APIView):
@@ -178,11 +200,14 @@ class LoginAPIView(APIView):
         login_id = serializer.validated_data["login_id"]
         password = serializer.validated_data["password"]
 
-        user = authenticate(request, username=login_id, password=password)
-        if user is None:
-            user_obj = User.objects.filter(email__iexact=login_id).first()
-            if user_obj:
-                user = authenticate(request, username=user_obj.username, password=password)
+        # Resolve username up front so we only invoke the password hasher once.
+        if "@" in login_id:
+            user_obj = User.objects.filter(email__iexact=login_id).only("username").first()
+            username_for_auth = user_obj.username if user_obj else login_id
+        else:
+            username_for_auth = login_id
+
+        user = authenticate(request, username=username_for_auth, password=password)
 
         if user is None:
             return Response({"error": "Invalid credentials."}, status=status.HTTP_401_UNAUTHORIZED)
@@ -220,7 +245,11 @@ class PasswordResetRequestAPIView(APIView):
             otp_verification.verified_at = None
             otp_verification.save()
 
-            safe_send_mail("Password Reset OTP", build_reset_text(otp_verification.otp), [email])
+            send_otp_email_task.delay(
+                "Password Reset OTP",
+                build_reset_text(otp_verification.otp),
+                [email],
+            )
 
         return Response({"message": "If an account with that email exists, password reset details have been sent."}, status=status.HTTP_200_OK)
 
