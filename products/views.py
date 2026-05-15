@@ -217,7 +217,7 @@ class ProductAPIView(PaginatedAPIView):
         return self.paginate(request, queryset, ProductSerializer)
 
     def post(self, request):
-        serializer = ProductSerializer(data=request.data)
+        serializer = ProductSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         # Default to active on creation unless explicitly set
         is_active = serializer.validated_data.get("is_active", True)
@@ -266,7 +266,8 @@ class ProductDetailAPIView(APIView):
     def put(self, request, pk):
         product = get_object_or_404(Product, pk=pk)
         serializer = ProductSerializer(
-            product, data=request.data, partial=True)
+            product, data=request.data, partial=True, context={"request": request}
+        )
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data)

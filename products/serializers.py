@@ -65,6 +65,13 @@ class ProductSerializer(SanitizedModelSerializer):
     brand_name = serializers.ReadOnlyField(source="brand.name")
     category_name = serializers.ReadOnlyField(source="category.name")
     subcategory_name = serializers.ReadOnlyField(source="subcategory.name")
+    images = serializers.SerializerMethodField(read_only=True)
+    uploaded_images = serializers.ListField(
+        child=serializers.ImageField(allow_empty_file=False, use_url=False),
+        required=False,
+        write_only=True,
+    )
+    
 
     class Meta:
         model = Product
@@ -72,17 +79,43 @@ class ProductSerializer(SanitizedModelSerializer):
             "id", "category", "category_name", "subcategory", "subcategory_name",
             "name", "product_image", "brand", "brand_name", "mpn", "sku",
             "description", "highlights", "rating", "featured", "top_selling",
-            "new_arrival", "is_active", "related_products", "frequently_bought_together", "created_at", "updated_at",
+            "new_arrival", "is_active", "related_products", "frequently_bought_together",
+            "images", "uploaded_images",
+            "created_at", "updated_at",
         ]
         # is_active is now writable. Public read access is filtered at the view layer.
         read_only_fields = [
             "id", "category_name", "subcategory_name", "brand_name",
-            "created_at", "updated_at",
+            "images", "created_at", "updated_at",
         ]
+
+    def get_images(self, obj):
+        """Single combined list: the main `product_image` is the first entry
+        (marked `is_main: true`), followed by all gallery ProductImage rows."""
+        request = self.context.get("request")
+
+        def absolute(url):
+            if not url:
+                return None
+            return request.build_absolute_uri(url) if request else url
+
+        combined = []
+        if obj.product_image:
+            combined.append({
+                "id": None,
+                "image_url": absolute(obj.product_image.url),
+                "is_main": True,
+            })
+        combined.extend({
+            "id": img.id,
+            "image_url": absolute(img.image.url) if img.image else None,
+            "is_main": False,
+        } for img in obj.images.all())
+        return combined
 
     def to_representation(self, instance):
         representation = super().to_representation(instance)
-        
+
         # Use prefetched related products if available to avoid extra DB queries
         if "related_products" in representation:
             # We filter in-memory if already prefetched, or fallback to DB if not
@@ -148,46 +181,75 @@ class ProductSerializer(SanitizedModelSerializer):
         return value
 
     def to_internal_value(self, data):
-        data = data.copy()
-        
+        # QueryDict.copy() does a deepcopy under the hood, which raises
+        # `TypeError: cannot pickle 'BufferedRandom' instances` once the
+        # request contains uploaded files (e.g. uploaded_images). Build a
+        # shallow mutable copy that reuses the file references instead.
+        from django.http import QueryDict
+        if isinstance(data, QueryDict):
+            shallow = QueryDict(mutable=True)
+            for key in data.keys():
+                shallow.setlist(key, data.getlist(key))
+            data = shallow
+        else:
+            data = {**data}
+
         # Normalize SKU before validation: convert empty strings to None
         if "sku" in data:
             sku_value = data.get("sku", "")
             if isinstance(sku_value, str):
                 sku_value = sku_value.strip()
             data["sku"] = sku_value if sku_value else None
-        
+
         # Handle foreign key fields that might be dict objects
         for field in ["category", "subcategory", "brand"]:
             if field in data and isinstance(data[field], dict) and "id" in data[field]:
                 data[field] = data[field]["id"]
-        
-        # Remove product_image if it's a string (already uploaded)
+
+        # Remove product_image if it's a string (already uploaded URL)
         val = data.get("product_image")
         if isinstance(val, str):
             data.pop("product_image", None)
-        
+
         return super().to_internal_value(data)
     
+    def _save_gallery_images(self, product, files):
+        """Append each uploaded file as a new ProductImage row.
+
+        Uses .create() rather than .bulk_create() so the post_save signal
+        fires for each row and the gallery cache is dropped.
+        """
+        if not files:
+            return
+        for f in files:
+            ProductImage.objects.create(product=product, image=f)
+
     def create(self, validated_data):
         """
         Ensure SKU is None (not empty string) before saving to prevent unique constraint violation.
         """
+        uploaded_images = validated_data.pop("uploaded_images", [])
         # Double-check SKU is None, not empty string
         if validated_data.get("sku") == "":
             validated_data["sku"] = None
-        
-        return super().create(validated_data)
-    
+
+        product = super().create(validated_data)
+        self._save_gallery_images(product, uploaded_images)
+        return product
+
     def update(self, instance, validated_data):
         """
         Ensure SKU is None (not empty string) before saving to prevent unique constraint violation.
         """
+        uploaded_images = validated_data.pop("uploaded_images", [])
         # Double-check SKU is None, not empty string
         if validated_data.get("sku") == "":
             validated_data["sku"] = None
-        
-        return super().update(instance, validated_data)
+
+        product = super().update(instance, validated_data)
+        # Append-only: existing gallery images are preserved.
+        self._save_gallery_images(product, uploaded_images)
+        return product
 
 
 class ProductImageSerializer(SanitizedModelSerializer):

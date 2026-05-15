@@ -71,26 +71,27 @@ def cache_product_list(timeout=300):
             cache_key = generate_cache_key("product_list", request, relevant_params)
             
             # Try to get from cache
-            cached_response = cache.get(cache_key)
-            if cached_response is not None:
+            cached_payload = cache.get(cache_key)
+            if cached_payload is not None:
                 logger.debug(f"Cache HIT: {cache_key}")
-                return cached_response
-            
+                return Response(cached_payload)
+
             logger.debug(f"Cache MISS: {cache_key} - querying database")
-            
+
             # Call the original view function
             response = view_func(self, request, *args, **kwargs)
-            
-            # Cache successful responses only
+
+            # Cache the serialized data (not the Response itself — DRF Response
+            # objects can't be pickled until they're rendered).
             if response.status_code == 200:
                 try:
-                    cache.set(cache_key, response, timeout)
+                    cache.set(cache_key, response.data, timeout)
                     logger.debug(f"Cache SET: {cache_key} with TTL={timeout}s")
                 except Exception as e:
                     logger.warning(f"Failed to cache response: {e}")
-            
+
             return response
-        
+
         return wrapper
     return decorator
 
@@ -117,26 +118,27 @@ def cache_product_detail(timeout=300):
             cache_key = f"product_detail:{pk}:public"
             
             # Try to get from cache
-            cached_response = cache.get(cache_key)
-            if cached_response is not None:
+            cached_payload = cache.get(cache_key)
+            if cached_payload is not None:
                 logger.debug(f"Cache HIT: {cache_key}")
-                return cached_response
-            
+                return Response(cached_payload)
+
             logger.debug(f"Cache MISS: {cache_key} - querying database")
-            
+
             # Call the original view function
             response = view_func(self, request, *args, **kwargs)
-            
-            # Cache successful responses only
+
+            # Cache the serialized data (not the Response itself — DRF Response
+            # objects can't be pickled until they're rendered).
             if response.status_code == 200:
                 try:
-                    cache.set(cache_key, response, timeout)
+                    cache.set(cache_key, response.data, timeout)
                     logger.debug(f"Cache SET: {cache_key} with TTL={timeout}s")
                 except Exception as e:
                     logger.warning(f"Failed to cache response: {e}")
-            
+
             return response
-        
+
         return wrapper
     return decorator
 

@@ -5,7 +5,7 @@ from django.dispatch import receiver
 from django.contrib.auth.models import User
 from orders.models import CustomerRequest
 from inventory.models import Inventory
-from products.models import Product, Category, Brand
+from products.models import Product, Category, Brand, ProductImage
 from reviews.models import ProductReview
 from wishlist.models import Wishlist
 import logging
@@ -78,6 +78,31 @@ def invalidate_brand_cache(sender, instance, created, **kwargs):
         logger.debug(f"Cache invalidated for brand: {instance.id}")
     except Exception as e:
         logger.error(f"Error invalidating cache for brand {instance.id}: {str(e)}")
+
+@receiver(post_save, sender=ProductImage)
+def invalidate_product_images_cache_on_save(sender, instance, **kwargs):
+    """Drop the cached gallery list so a newly uploaded image appears
+    immediately on the next product detail fetch."""
+    from core.cache_utils import CacheManager
+    try:
+        CacheManager.delete_cache(f"product_images:{instance.product_id}")
+        CacheManager.clear_product_cache(instance.product_id)
+        CacheManager.clear_product_list_cache()
+    except Exception as e:
+        logger.error(f"Error invalidating product image cache: {str(e)}")
+
+
+@receiver(post_delete, sender=ProductImage)
+def invalidate_product_images_cache_on_delete(sender, instance, **kwargs):
+    """Same as above but for image deletion."""
+    from core.cache_utils import CacheManager
+    try:
+        CacheManager.delete_cache(f"product_images:{instance.product_id}")
+        CacheManager.clear_product_cache(instance.product_id)
+        CacheManager.clear_product_list_cache()
+    except Exception as e:
+        logger.error(f"Error invalidating product image cache: {str(e)}")
+
 
 @receiver(post_save, sender=Inventory)
 def invalidate_inventory_cache(sender, instance, created, **kwargs):
