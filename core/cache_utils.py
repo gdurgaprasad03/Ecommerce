@@ -137,18 +137,18 @@ class CacheManager:
     @staticmethod
     def clear_product_cache(product_id: int = None) -> bool:
         """
-        Clear product cache
+        Clear every cached representation of a product.
 
-        Args:
-            product_id: Specific product ID to clear, or None to clear all products
-
-        Returns:
-            True if successful, False otherwise
+        Wiping `product:{id}` alone isn't enough: the product detail decorator
+        stores variants like `product:{id}:public`, and the cached gallery
+        lives at `product_images:{id}`. Use a pattern delete so a single
+        write-side invalidation reaches all of them.
         """
         if product_id:
-            return CacheManager.delete_cache(CacheManager.get_product_cache_key(product_id))
-        else:
-            return CacheManager.delete_pattern(f"{PRODUCT_CACHE_PREFIX}*")
+            ok_pattern = CacheManager.delete_pattern(f"{PRODUCT_CACHE_PREFIX}{product_id}*")
+            ok_images = CacheManager.delete_cache(f"product_images:{product_id}")
+            return ok_pattern and ok_images
+        return CacheManager.delete_pattern(f"{PRODUCT_CACHE_PREFIX}*")
 
     @staticmethod
     def clear_category_cache(category_id: int = None) -> bool:

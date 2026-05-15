@@ -179,23 +179,26 @@ class ProductAPIView(PaginatedAPIView):
             and request.user.is_staff
             and request.query_params.get("include_inactive", "").lower() == "true"
         )
-        
-        # OPTIMIZATION: Use select_related + prefetch_related to minimize DB queries
+
         queryset = Product.objects.select_related(
             "brand", "category", "subcategory"
         ).prefetch_related(
             Prefetch(
                 "related_products",
-                queryset=Product.objects.filter(is_active=True).only("id", "name", "product_image", "sku", "is_active"),
-                to_attr="active_related_products"
+                queryset=Product.objects.filter(is_active=True).only(
+                    "id", "name", "product_image", "sku", "is_active"
+                ),
+                to_attr="active_related_products",
             ),
             Prefetch(
                 "frequently_bought_together",
-                queryset=Product.objects.filter(is_active=True).only("id", "name", "product_image", "sku", "is_active"),
-                to_attr="active_fbt_products"
+                queryset=Product.objects.filter(is_active=True).only(
+                    "id", "name", "product_image", "sku", "is_active"
+                ),
+                to_attr="active_fbt_products",
             ),
         )
-        
+
         if not include_inactive:
             queryset = queryset.filter(is_active=True)
 
@@ -214,12 +217,21 @@ class ProductAPIView(PaginatedAPIView):
         if subcategory_id:
             queryset = queryset.filter(subcategory_id=subcategory_id)
 
-        return self.paginate(request, queryset, ProductSerializer)
+        response = self.paginate(request, queryset, ProductSerializer)
+
+        # Admins must never see a cached/stale list. Tell upstream proxies
+        # and the browser not to cache the admin variant. Public users still
+        # go through @cache_product_list which handles TTL.
+        if request.user.is_authenticated and request.user.is_staff:
+            response["Cache-Control"] = "no-store, no-cache, must-revalidate"
+            response["Pragma"] = "no-cache"
+            response["Expires"] = "0"
+
+        return response
 
     def post(self, request):
         serializer = ProductSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
-        # Default to active on creation unless explicitly set
         is_active = serializer.validated_data.get("is_active", True)
         serializer.save(is_active=is_active)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -240,28 +252,31 @@ class ProductDetailAPIView(APIView):
         ).prefetch_related(
             Prefetch(
                 "related_products",
-                queryset=Product.objects.filter(is_active=True).only("id", "name", "product_image", "sku", "is_active"),
-                to_attr="active_related_products"
+                queryset=Product.objects.filter(is_active=True).only(
+                    "id", "name", "product_image", "sku", "is_active"
+                ),
+                to_attr="active_related_products",
             ),
             Prefetch(
                 "frequently_bought_together",
-                queryset=Product.objects.filter(is_active=True).only("id", "name", "product_image", "sku", "is_active"),
-                to_attr="active_fbt_products"
+                queryset=Product.objects.filter(is_active=True).only(
+                    "id", "name", "product_image", "sku", "is_active"
+                ),
+                to_attr="active_fbt_products",
             ),
         )
         if not (request.user.is_authenticated and request.user.is_staff):
             queryset = queryset.filter(is_active=True)
         product = get_object_or_404(queryset, pk=pk)
-        
-        # Record history for authenticated users
+
         if request.user.is_authenticated:
             from .models import RecentlyViewedProduct
             RecentlyViewedProduct.objects.update_or_create(
                 user=request.user,
-                product=product
+                product=product,
             )
-            
-        return Response(CachedProductSerializer(product).data)
+
+        return Response(CachedProductSerializer(product, context={"request": request}).data)
 
     def put(self, request, pk):
         product = get_object_or_404(Product, pk=pk)
@@ -276,10 +291,22 @@ class ProductDetailAPIView(APIView):
         return self.put(request, pk)
 
     def delete(self, request, pk):
+        """
+        Delete a product and AGGRESSIVELY invalidate every cache that could
+        still reference it. This fixes the "ghost product" bug where a deleted
+        item kept appearing on the admin list until the 5-minute cache TTL
+        elapsed, leading users to click delete again and get 404 errors.
+
+        Belt-and-suspenders: the post_delete signal in core/signals.py also
+        clears these caches, but signals can be bypassed (queryset.delete(),
+        raw SQL) or silently fail (IGNORE_EXCEPTIONS=True on the cache).
+        Doing it inline guarantees the next list GET sees fresh data.
+        """
         product = get_object_or_404(Product, pk=pk)
+        product_id = product.id  # capture before .delete() invalidates the instance
+
         try:
             product.delete()
-            return Response(status=status.HTTP_204_NO_CONTENT)
         except ProtectedError:
             return Response(
                 {
@@ -288,6 +315,27 @@ class ProductDetailAPIView(APIView):
                 },
                 status=status.HTTP_409_CONFLICT,
             )
+
+        # Explicit cache wipe — runs in the request thread, not async.
+        # Redis DELs are sub-millisecond; total overhead < 5ms typical.
+        from core.cache_utils import CacheManager
+        try:
+            CacheManager.clear_product_cache(product_id)
+            CacheManager.clear_product_list_cache()
+            CacheManager.clear_analytics_cache()
+            CacheManager.delete_cache(f"product_specs:{product_id}")
+            CacheManager.delete_cache(f"product_reviews:{product_id}")
+            CacheManager.delete_cache(f"product_inventory:{product_id}")
+            logger.info(f"Explicit cache wipe after deleting product {product_id}")
+        except Exception as e:
+            logger.error(
+                f"Explicit cache wipe FAILED after deleting product {product_id}: {e}",
+                exc_info=True,
+            )
+
+        response = Response(status=status.HTTP_204_NO_CONTENT)
+        response["Cache-Control"] = "no-store"
+        return response
 
 
 class ProductListAPIView(APIView):
@@ -315,7 +363,6 @@ class ProductListAPIView(APIView):
             "is_active": True,
         }
 
-        # Try Elasticsearch; fall back to DB on any failure
         search_result = None
         try:
             search_result = ElasticsearchSearchManager.search(
@@ -345,7 +392,6 @@ class ProductListAPIView(APIView):
                 "page_size": page_size,
             })
 
-        # DB fallback
         queryset = Product.objects.filter(is_active=True).select_related(
             "brand", "category"
         ).prefetch_related(
@@ -374,7 +420,7 @@ class RecentlyViewedProductsAPIView(APIView):
             user=request.user,
             product__is_active=True
         ).select_related("product", "product__brand", "product__category")[:10]
-        
+
         products = [h.product for h in history]
         serializer = ProductSerializer(products, many=True, context={"request": request})
         return Response(serializer.data)
@@ -556,9 +602,7 @@ class BulkProductUploadAPIView(APIView):
             if not result["success"]:
                 return Response(result, status=status.HTTP_400_BAD_REQUEST)
 
-            # 207 Multi-Status if some rows had warnings/failures
-            has_issues = bool(result.get("warnings")
-                              ) or result.get("failed", 0) > 0
+            has_issues = bool(result.get("warnings")) or result.get("failed", 0) > 0
             if has_issues and result.get("successful", 0) > 0:
                 return Response(result, status=status.HTTP_207_MULTI_STATUS)
             return Response(result, status=status.HTTP_201_CREATED)

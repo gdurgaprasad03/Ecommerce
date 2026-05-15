@@ -130,7 +130,6 @@ class ProductSerializer(SanitizedModelSerializer):
                 fbt_products = instance.frequently_bought_together.filter(is_active=True)
             representation["frequently_bought_together"] = ProductMinimalSerializer(fbt_products, many=True).data
         
-        # WhatsApp Share Link
         frontend_url = getattr(settings, "FRONTEND_BASE_URL", "http://localhost:5173")
         product_url = f"{frontend_url}/products/{instance.id}"
         message = f"Hey, check out this {instance.name} on our site! {product_url}"

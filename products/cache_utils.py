@@ -16,13 +16,16 @@ logger = logging.getLogger(__name__)
 def generate_cache_key(prefix, request, params_to_include=None):
     """
     Generate a cache key based on request params.
-    Only includes relevant query parameters to reduce cache key variations.
+
+    The returned key starts with `{prefix}:` so that
+    `CacheManager.clear_*_cache()` (which uses `delete_pattern("{prefix}:*")`)
+    can wipe every variant in one shot when a product/image is mutated.
     """
     if params_to_include is None:
         params_to_include = []
-    
-    key_parts = [prefix]
-    
+
+    key_parts = []
+
     # Include user authentication status
     if request.user.is_authenticated:
         key_parts.append(f"user_{request.user.id}")
@@ -30,18 +33,19 @@ def generate_cache_key(prefix, request, params_to_include=None):
             key_parts.append("admin")
     else:
         key_parts.append("anon")
-    
+
     # Include relevant query parameters
     for param in params_to_include:
         value = request.query_params.get(param, "")
         if value:
             key_parts.append(f"{param}_{value}")
-    
+
     # Create deterministic hash
     key_str = "|".join(key_parts)
     key_hash = hashlib.md5(key_str.encode()).hexdigest()
-    
-    return f"products:{prefix}:{key_hash}"
+
+    # IMPORTANT: leading `{prefix}:` so CacheManager.delete_pattern matches.
+    return f"{prefix}:{key_hash}"
 
 
 def cache_product_list(timeout=300):
@@ -114,8 +118,10 @@ def cache_product_detail(timeout=300):
                 logger.debug(f"Cache SKIPPED: Admin user fetching product {pk}")
                 return view_func(self, request, *args, **kwargs)
             
-            # Generate cache key
-            cache_key = f"product_detail:{pk}:public"
+            # Key must start with `product:` so CacheManager.clear_product_cache(pk)
+            # — which deletes `product:{pk}` — can also be widened to a pattern
+            # delete (`product:{pk}:*`) by the signal handler below.
+            cache_key = f"product:{pk}:public"
             
             # Try to get from cache
             cached_payload = cache.get(cache_key)
