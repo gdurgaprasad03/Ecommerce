@@ -23,15 +23,34 @@ class SanitizedModelSerializer(serializers.ModelSerializer):
                 ret[field_name] = html.unescape(stripped)
         return ret
 
+ALLOWED_IMAGE_CONTENT_TYPES = {
+    "image/jpeg",
+    "image/jpg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+}
+ALLOWED_IMAGE_EXTENSIONS = {"jpg", "jpeg", "png", "gif", "webp"}
+
+
 def validate_image_file(value):
     """
     Reusable image validator for size and type.
     """
     max_size = 5 * 1024 * 1024
-    content_type = getattr(value, "content_type", "")
+    content_type = (getattr(value, "content_type", "") or "").lower()
+    name = (getattr(value, "name", "") or "").lower()
+    ext = name.rsplit(".", 1)[-1] if "." in name else ""
 
     if content_type and not content_type.startswith("image/"):
         raise serializers.ValidationError("Only image uploads are allowed.")
+
+    if (content_type and content_type not in ALLOWED_IMAGE_CONTENT_TYPES) or (
+        ext and ext not in ALLOWED_IMAGE_EXTENSIONS
+    ):
+        raise serializers.ValidationError(
+            "Unsupported image format. Allowed formats: JPG, JPEG, PNG, GIF, WEBP."
+        )
 
     if value.size > max_size:
         raise serializers.ValidationError("Image size must be 5MB or less.")
