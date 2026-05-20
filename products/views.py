@@ -160,6 +160,53 @@ class SubCategoryAPIView(APIView):
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
+class SubCategoryDetailAPIView(APIView):
+    def get_permissions(self):
+        if self.request.method in ["GET", "OPTIONS"]:
+            return [AllowAny()]
+        return [IsAdminUser()]
+
+    def get(self, request, pk, subcategory_pk):
+        parent_category = get_object_or_404(
+            Category.objects.prefetch_related("subcategories").filter(is_active=True),
+            pk=pk,
+        )
+        subcategory = get_object_or_404(
+            parent_category.subcategories.filter(is_active=True),
+            pk=subcategory_pk,
+        )
+        return Response(CategoryReadSerializer(subcategory, context={"depth": 0}).data)
+
+    def put(self, request, pk, subcategory_pk):
+        parent_category = get_object_or_404(Category, pk=pk)
+        subcategory = get_object_or_404(
+            parent_category.subcategories.all(),
+            pk=subcategory_pk,
+        )
+        data = request.data.copy()
+        data["parent"] = parent_category.id
+        serializer = CategoryWriteSerializer(
+            subcategory, data=data, partial=True
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
+
+    def delete(self, request, pk, subcategory_pk):
+        parent_category = get_object_or_404(Category, pk=pk)
+        subcategory = get_object_or_404(
+            parent_category.subcategories.all(),
+            pk=subcategory_pk,
+        )
+        try:
+            subcategory.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        except ProtectedError:
+            return Response(
+                {"error": "Cannot delete this subcategory because it is linked to existing products."},
+                status=status.HTTP_409_CONFLICT,
+            )
+
 
 class ProductAPIView(PaginatedAPIView):
     parser_classes = [MultiPartParser, FormParser]
