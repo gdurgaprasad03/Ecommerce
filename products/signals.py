@@ -11,7 +11,6 @@ logger = logging.getLogger(__name__)
 
 @receiver(post_save, sender=Product)
 def sync_product_to_elasticsearch_on_save(sender, instance, **kwargs):
-    """Push product to ES index on save (only if USE_ELASTICSEARCH=True)."""
     if not getattr(settings, "USE_ELASTICSEARCH", False):
         return
     try:
@@ -24,7 +23,6 @@ def sync_product_to_elasticsearch_on_save(sender, instance, **kwargs):
 
 @receiver(post_delete, sender=Product)
 def sync_product_to_elasticsearch_on_delete(sender, instance, **kwargs):
-    """Drop product from ES index on delete (only if USE_ELASTICSEARCH=True)."""
     if not getattr(settings, "USE_ELASTICSEARCH", False):
         return
     try:
@@ -38,13 +36,7 @@ def sync_product_to_elasticsearch_on_delete(sender, instance, **kwargs):
 @receiver(post_save, sender=ProductImage)
 @receiver(post_delete, sender=ProductImage)
 def invalidate_image_caches_on_gallery_change(sender, instance, **kwargs):
-    """
-    When a ProductImage row is added/removed, bust:
-      - the per-product gallery cache (product_images:<id>)
-      - the product detail cache (product:<id>*)
-      - the product list cache (product_list:*)
-    because all three can embed image URLs.
-    """
+   
     from core.cache_utils import CacheManager
     try:
         CacheManager.delete_cache(f"product_images:{instance.product_id}")

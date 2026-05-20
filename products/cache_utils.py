@@ -14,13 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 def generate_cache_key(prefix, request, params_to_include=None):
-    """
-    Generate a cache key based on request params.
-
-    The returned key starts with `{prefix}:` so that
-    `CacheManager.clear_*_cache()` (which uses `delete_pattern("{prefix}:*")`)
-    can wipe every variant in one shot when a product/image is mutated.
-    """
+   
     if params_to_include is None:
         params_to_include = []
 
@@ -45,19 +39,7 @@ def generate_cache_key(prefix, request, params_to_include=None):
 
 
 def cache_product_list(timeout=300):
-    """
-    Cache product list responses with smart TTL.
-    
-    Cache Strategy:
-    - Public users (non-authenticated): 5 minutes cache
-    - Admins (authenticated + staff): NO cache (always fresh)
-    - Includes query parameters in cache key
-    
-    Why this works:
-    - Public users see fast cached responses
-    - Admins uploading images see fresh data immediately
-    - No "images not showing" issue for concurrent uploads
-    """
+   
     def decorator(view_func):
         @wraps(view_func)
         def wrapper(self, request, *args, **kwargs):
@@ -91,13 +73,7 @@ def cache_product_list(timeout=300):
 
 
 def cache_product_detail(timeout=300):
-    """
-    Cache product detail responses with smart TTL.
-    
-    Cache Strategy:
-    - Public users: 5 minutes cache
-    - Admins: NO cache (need fresh data when uploading images)
-    """
+  
     def decorator(view_func):
         @wraps(view_func)
         def wrapper(self, request, *args, **kwargs):

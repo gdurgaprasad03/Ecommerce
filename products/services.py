@@ -46,7 +46,7 @@ def parse_int(value, default=0):
 
 
 def is_safe_url(url, allowed_schemes=("http", "https")):
-    """Reject URLs pointing to private/internal IPs (SSRF defense)."""
+    
     try:
         parsed = urlparse(url)
         if parsed.scheme not in allowed_schemes:
@@ -155,7 +155,7 @@ class BulkProductUploadService:
 
     @classmethod
     def validate_image_url(cls, url):
-        """HEAD request to check URL is reachable and serves an image. Fast."""
+        
         ok, reason = is_safe_url(url)
         if not ok:
             return False, reason
