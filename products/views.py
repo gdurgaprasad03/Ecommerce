@@ -80,45 +80,69 @@ class CategoryAPIView(PaginatedAPIView):
         if self.request.method in ["GET", "OPTIONS"]:
             return [AllowAny()]
         return [IsAdminUser()]
-
+ 
     def get(self, request):
         is_tree = request.query_params.get("tree", "false").lower() == "true"
         base_queryset = Category.objects.filter(is_active=True)
-        queryset = base_queryset.filter(
-            parent__isnull=True) if is_tree else base_queryset
+        queryset = base_queryset.filter(parent__isnull=True) if is_tree else base_queryset
         queryset = queryset.prefetch_related("subcategories")
         serializer_class = CategorySerializer if is_tree else CategorySimpleSerializer
         return self.paginate(request, queryset, serializer_class)
-
+ 
     def post(self, request):
         serializer = CategoryWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        serializer.save()
+        try:
+            serializer.save()
+        except IntegrityError:
+            return Response(
+                {"error": "A category with this name already exists at this level. Please choose a different name."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error creating category: {e}", exc_info=True)
+            return Response(
+                {"error": "Could not create the category. Please try again."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
         return Response(serializer.data, status=status.HTTP_201_CREATED)
-
-
+ 
+ 
+# ─────────────────────────────────────────────────────────────────────────────
+# CategoryDetailAPIView  (read / update / delete single category)
+# ─────────────────────────────────────────────────────────────────────────────
 class CategoryDetailAPIView(APIView):
     def get_permissions(self):
         if self.request.method in ["GET", "OPTIONS"]:
             return [AllowAny()]
         return [IsAdminUser()]
-
+ 
     def get(self, request, pk):
         category = get_object_or_404(
-            Category.objects.prefetch_related(
-                "subcategories").filter(is_active=True),
+            Category.objects.prefetch_related("subcategories").filter(is_active=True),
             pk=pk,
         )
         return Response(CategorySerializer(category).data)
-
+ 
     def put(self, request, pk):
         category = get_object_or_404(Category, pk=pk)
-        serializer = CategoryWriteSerializer(
-            category, data=request.data, partial=True)
+        serializer = CategoryWriteSerializer(category, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
-        serializer.save()
+        try:
+            serializer.save()
+        except IntegrityError:
+            return Response(
+                {"error": "A category with this name already exists at this level. Please choose a different name."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error updating category {pk}: {e}", exc_info=True)
+            return Response(
+                {"error": "Could not update the category. Please try again."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
         return Response(serializer.data)
-
+ 
     def delete(self, request, pk):
         category = get_object_or_404(Category, pk=pk)
         try:
@@ -126,21 +150,30 @@ class CategoryDetailAPIView(APIView):
             return Response(status=status.HTTP_204_NO_CONTENT)
         except ProtectedError:
             return Response(
-                {"error": "Cannot delete this category because it is linked to existing products or subcategories."},
+                {"error": "Cannot delete this category because it still has products or subcategories linked to it. "
+                          "Remove or reassign them first, or mark the category as inactive instead."},
                 status=status.HTTP_409_CONFLICT,
             )
-
-
+        except Exception as e:
+            logger.error(f"Unexpected error deleting category {pk}: {e}", exc_info=True)
+            return Response(
+                {"error": "Could not delete the category. Please try again."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+ 
+ 
+# ─────────────────────────────────────────────────────────────────────────────
+# SubCategoryAPIView  (list + create subcategories under a parent)
+# ─────────────────────────────────────────────────────────────────────────────
 class SubCategoryAPIView(APIView):
     def get_permissions(self):
         if self.request.method in ["GET", "OPTIONS"]:
             return [AllowAny()]
         return [IsAdminUser()]
-
+ 
     def get(self, request, pk):
         category = get_object_or_404(
-            Category.objects.prefetch_related(
-                "subcategories").filter(is_active=True),
+            Category.objects.prefetch_related("subcategories").filter(is_active=True),
             pk=pk,
         )
         serializer = CategoryReadSerializer(
@@ -149,23 +182,43 @@ class SubCategoryAPIView(APIView):
             context={"depth": 0},
         )
         return Response(serializer.data)
-
+ 
     def post(self, request, pk):
         parent_category = get_object_or_404(Category, pk=pk)
         data = request.data.copy()
         data["parent"] = parent_category.id
         serializer = CategoryWriteSerializer(data=data)
         serializer.is_valid(raise_exception=True)
-        serializer.save()
+        try:
+            serializer.save()
+        except IntegrityError:
+            return Response(
+                {
+                    "error": (
+                        f'A subcategory with that name already exists under "{parent_category.name}". '
+                        "Please choose a different name."
+                    )
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error creating subcategory under category {pk}: {e}", exc_info=True)
+            return Response(
+                {"error": "Could not create the subcategory. Please try again."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
         return Response(serializer.data, status=status.HTTP_201_CREATED)
-
-
+ 
+ 
+# ─────────────────────────────────────────────────────────────────────────────
+# SubCategoryDetailAPIView  (read / update / delete a specific subcategory)
+# ─────────────────────────────────────────────────────────────────────────────
 class SubCategoryDetailAPIView(APIView):
     def get_permissions(self):
         if self.request.method in ["GET", "OPTIONS"]:
             return [AllowAny()]
         return [IsAdminUser()]
-
+ 
     def get(self, request, pk, subcategory_pk):
         parent_category = get_object_or_404(
             Category.objects.prefetch_related("subcategories").filter(is_active=True),
@@ -176,7 +229,7 @@ class SubCategoryDetailAPIView(APIView):
             pk=subcategory_pk,
         )
         return Response(CategoryReadSerializer(subcategory, context={"depth": 0}).data)
-
+ 
     def put(self, request, pk, subcategory_pk):
         parent_category = get_object_or_404(Category, pk=pk)
         subcategory = get_object_or_404(
@@ -184,14 +237,38 @@ class SubCategoryDetailAPIView(APIView):
             pk=subcategory_pk,
         )
         data = request.data.copy()
+        # Always force parent to the one in the URL — prevents accidental reparenting
         data["parent"] = parent_category.id
-        serializer = CategoryWriteSerializer(
-            subcategory, data=data, partial=True
-        )
+ 
+        serializer = CategoryWriteSerializer(subcategory, data=data, partial=True)
         serializer.is_valid(raise_exception=True)
-        serializer.save()
-        return Response(serializer.data)
-
+ 
+        try:
+            serializer.save()
+        except IntegrityError:
+            return Response(
+                {
+                    "error": (
+                        f'A subcategory with that name already exists under "{parent_category.name}". '
+                        "Please choose a different name."
+                    )
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        except Exception as e:
+            logger.error(
+                f"Unexpected error updating subcategory {subcategory_pk} under category {pk}: {e}",
+                exc_info=True,
+            )
+            return Response(
+                {"error": "Could not update the subcategory. Please try again."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+ 
+        # FIX: return the full readable representation (with nested fields),
+        # not just CategoryWriteSerializer.data (raw IDs with no names).
+        return Response(CategoryReadSerializer(subcategory, context={"depth": 0}).data)
+ 
     def delete(self, request, pk, subcategory_pk):
         parent_category = get_object_or_404(Category, pk=pk)
         subcategory = get_object_or_404(
@@ -203,11 +280,23 @@ class SubCategoryDetailAPIView(APIView):
             return Response(status=status.HTTP_204_NO_CONTENT)
         except ProtectedError:
             return Response(
-                {"error": "Cannot delete this subcategory because it is linked to existing products."},
+                {
+                    "error": (
+                        f'Cannot delete "{subcategory.name}" because it still has products linked to it. '
+                        "Remove or reassign those products first, or mark the subcategory as inactive instead."
+                    )
+                },
                 status=status.HTTP_409_CONFLICT,
             )
-
-
+        except Exception as e:
+            logger.error(
+                f"Unexpected error deleting subcategory {subcategory_pk} under category {pk}: {e}",
+                exc_info=True,
+            )
+            return Response(
+                {"error": "Could not delete the subcategory. Please try again."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 class ProductAPIView(PaginatedAPIView):
     parser_classes = [MultiPartParser, FormParser]
 

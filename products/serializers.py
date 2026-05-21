@@ -47,6 +47,34 @@ class CategoryWriteSerializer(SanitizedModelSerializer):
     class Meta:
         model = Category
         fields = ["id", "name", "parent", "navbar_group", "is_active"]
+ 
+    def validate(self, attrs):
+        """
+        Enforce the (name, parent) unique constraint at the serializer layer so
+        the user gets a clear 400 error instead of a raw 500 IntegrityError.
+        """
+        # When doing a partial update, fall back to the instance's existing values
+        # for any field that wasn't supplied in the request.
+        instance = self.instance
+        name = attrs.get("name", getattr(instance, "name", None))
+        parent = attrs.get("parent", getattr(instance, "parent", None))
+ 
+        if name is not None:
+            qs = Category.objects.filter(name__iexact=name, parent=parent)
+            if instance is not None:
+                # Exclude the current record so a no-change save doesn't false-fire
+                qs = qs.exclude(pk=instance.pk)
+            if qs.exists():
+                parent_label = parent.name if parent else "the top level"
+                raise serializers.ValidationError(
+                    {
+                        "name": (
+                            f'A category named "{name}" already exists under {parent_label}. '
+                            "Please choose a different name."
+                        )
+                    }
+                )
+        return attrs
 
 
 class CategorySerializer(serializers.ModelSerializer):
