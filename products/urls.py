@@ -6,6 +6,7 @@ from .views import (
     ProductAPIView, ProductDetailAPIView, ProductImageDetailAPIView,
     ProductImageListAPIView, ProductListAPIView,
     ProductSpecificationDetailAPIView, ProductSpecificationListAPIView,
+    ProductSpecificationBulkDeleteAPIView, ProductSpecificationSectionsAPIView,
     RecentlyViewedProductsAPIView,
     SearchFacetsAPIView, SimilarProductsAPIView, SubCategoryAPIView,
     SubCategoryDetailAPIView,
@@ -34,5 +35,7 @@ urlpatterns = [
     path("images/<int:pk>/", ProductImageDetailAPIView.as_view(), name="image-detail"),
 
     path("specifications/", ProductSpecificationListAPIView.as_view(), name="spec-list-create"),
+    path("specifications/sections/", ProductSpecificationSectionsAPIView.as_view(), name="spec-sections"),
+    path("specifications/bulk/delete/", ProductSpecificationBulkDeleteAPIView.as_view(), name="spec-bulk-delete"),
     path("specifications/<int:pk>/", ProductSpecificationDetailAPIView.as_view(), name="spec-detail"),
 ]

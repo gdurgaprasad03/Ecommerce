@@ -1,5 +1,6 @@
 import logging
 
+from django.db import IntegrityError, transaction
 from django.db.models import Q, Prefetch, Avg
 from django.db.models.deletion import ProtectedError
 from django.shortcuts import get_object_or_404
@@ -23,6 +24,19 @@ from .services import BulkProductUploadService
 
 logger = logging.getLogger(__name__)
 
+# Predefined sections matching the frontend UI tabs
+SPEC_SECTIONS = [
+    "Additional Details",
+    "Audio / Ports",
+    "Connectivity",
+    "Display",
+    "General",
+    "Memory",
+    "Operating System",
+    "Physical",
+    "Power",
+    "Processor",
+]
 
 
 class BrandAPIView(PaginatedAPIView):
@@ -74,13 +88,12 @@ class BrandDetailAPIView(APIView):
             )
 
 
-
 class CategoryAPIView(PaginatedAPIView):
     def get_permissions(self):
         if self.request.method in ["GET", "OPTIONS"]:
             return [AllowAny()]
         return [IsAdminUser()]
- 
+
     def get(self, request):
         is_tree = request.query_params.get("tree", "false").lower() == "true"
         base_queryset = Category.objects.filter(is_active=True)
@@ -88,7 +101,7 @@ class CategoryAPIView(PaginatedAPIView):
         queryset = queryset.prefetch_related("subcategories")
         serializer_class = CategorySerializer if is_tree else CategorySimpleSerializer
         return self.paginate(request, queryset, serializer_class)
- 
+
     def post(self, request):
         serializer = CategoryWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -106,24 +119,21 @@ class CategoryAPIView(PaginatedAPIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
         return Response(serializer.data, status=status.HTTP_201_CREATED)
- 
- 
-# ─────────────────────────────────────────────────────────────────────────────
-# CategoryDetailAPIView  (read / update / delete single category)
-# ─────────────────────────────────────────────────────────────────────────────
+
+
 class CategoryDetailAPIView(APIView):
     def get_permissions(self):
         if self.request.method in ["GET", "OPTIONS"]:
             return [AllowAny()]
         return [IsAdminUser()]
- 
+
     def get(self, request, pk):
         category = get_object_or_404(
             Category.objects.prefetch_related("subcategories").filter(is_active=True),
             pk=pk,
         )
         return Response(CategorySerializer(category).data)
- 
+
     def put(self, request, pk):
         category = get_object_or_404(Category, pk=pk)
         serializer = CategoryWriteSerializer(category, data=request.data, partial=True)
@@ -142,7 +152,7 @@ class CategoryDetailAPIView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
         return Response(serializer.data)
- 
+
     def delete(self, request, pk):
         category = get_object_or_404(Category, pk=pk)
         try:
@@ -160,17 +170,14 @@ class CategoryDetailAPIView(APIView):
                 {"error": "Could not delete the category. Please try again."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
- 
- 
-# ─────────────────────────────────────────────────────────────────────────────
-# SubCategoryAPIView  (list + create subcategories under a parent)
-# ─────────────────────────────────────────────────────────────────────────────
+
+
 class SubCategoryAPIView(APIView):
     def get_permissions(self):
         if self.request.method in ["GET", "OPTIONS"]:
             return [AllowAny()]
         return [IsAdminUser()]
- 
+
     def get(self, request, pk):
         category = get_object_or_404(
             Category.objects.prefetch_related("subcategories").filter(is_active=True),
@@ -182,7 +189,7 @@ class SubCategoryAPIView(APIView):
             context={"depth": 0},
         )
         return Response(serializer.data)
- 
+
     def post(self, request, pk):
         parent_category = get_object_or_404(Category, pk=pk)
         data = request.data.copy()
@@ -208,17 +215,14 @@ class SubCategoryAPIView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
         return Response(serializer.data, status=status.HTTP_201_CREATED)
- 
- 
-# ─────────────────────────────────────────────────────────────────────────────
-# SubCategoryDetailAPIView  (read / update / delete a specific subcategory)
-# ─────────────────────────────────────────────────────────────────────────────
+
+
 class SubCategoryDetailAPIView(APIView):
     def get_permissions(self):
         if self.request.method in ["GET", "OPTIONS"]:
             return [AllowAny()]
         return [IsAdminUser()]
- 
+
     def get(self, request, pk, subcategory_pk):
         parent_category = get_object_or_404(
             Category.objects.prefetch_related("subcategories").filter(is_active=True),
@@ -229,7 +233,7 @@ class SubCategoryDetailAPIView(APIView):
             pk=subcategory_pk,
         )
         return Response(CategoryReadSerializer(subcategory, context={"depth": 0}).data)
- 
+
     def put(self, request, pk, subcategory_pk):
         parent_category = get_object_or_404(Category, pk=pk)
         subcategory = get_object_or_404(
@@ -237,12 +241,11 @@ class SubCategoryDetailAPIView(APIView):
             pk=subcategory_pk,
         )
         data = request.data.copy()
-        # Always force parent to the one in the URL — prevents accidental reparenting
         data["parent"] = parent_category.id
- 
+
         serializer = CategoryWriteSerializer(subcategory, data=data, partial=True)
         serializer.is_valid(raise_exception=True)
- 
+
         try:
             serializer.save()
         except IntegrityError:
@@ -264,11 +267,9 @@ class SubCategoryDetailAPIView(APIView):
                 {"error": "Could not update the subcategory. Please try again."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
- 
-        # FIX: return the full readable representation (with nested fields),
-        # not just CategoryWriteSerializer.data (raw IDs with no names).
+
         return Response(CategoryReadSerializer(subcategory, context={"depth": 0}).data)
- 
+
     def delete(self, request, pk, subcategory_pk):
         parent_category = get_object_or_404(Category, pk=pk)
         subcategory = get_object_or_404(
@@ -297,6 +298,8 @@ class SubCategoryDetailAPIView(APIView):
                 {"error": "Could not delete the subcategory. Please try again."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
+
 class ProductAPIView(PaginatedAPIView):
     parser_classes = [MultiPartParser, FormParser]
 
@@ -420,17 +423,6 @@ class ProductDetailAPIView(APIView):
         return self.put(request, pk)
 
     def delete(self, request, pk):
-        """
-        Delete a product and AGGRESSIVELY invalidate every cache that could
-        still reference it. This fixes the "ghost product" bug where a deleted
-        item kept appearing on the admin list until the 5-minute cache TTL
-        elapsed, leading users to click delete again and get 404 errors.
-
-        Belt-and-suspenders: the post_delete signal in core/signals.py also
-        clears these caches, but signals can be bypassed (queryset.delete(),
-        raw SQL) or silently fail (IGNORE_EXCEPTIONS=True on the cache).
-        Doing it inline guarantees the next list GET sees fresh data.
-        """
         product = get_object_or_404(Product, pk=pk)
         product_id = product.id
 
@@ -600,7 +592,6 @@ class SimilarProductsAPIView(APIView):
         })
 
 
-
 class ProductImageListAPIView(PaginatedAPIView):
     parser_classes = [MultiPartParser, FormParser]
 
@@ -653,7 +644,6 @@ class ProductImageDetailAPIView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-
 class ProductSpecificationListAPIView(PaginatedAPIView):
     def get_permissions(self):
         if self.request.method in ["GET", "OPTIONS"]:
@@ -661,19 +651,132 @@ class ProductSpecificationListAPIView(PaginatedAPIView):
         return [IsAdminUser()]
 
     def get(self, request):
+        """
+        GET /products/specifications/                        → all specs (paginated)
+        GET /products/specifications/?product=1              → specs for product 1
+        GET /products/specifications/?product=1&grouped=true → grouped by section
+        """
         queryset = ProductSpecification.objects.select_related("product").order_by(
             "product_id", "section", "key", "id"
         )
         product_id = request.query_params.get("product")
         if product_id:
             queryset = queryset.filter(product_id=product_id)
+
+        # Grouped format for frontend section tabs
+        if request.query_params.get("grouped", "").lower() == "true":
+            specs = list(queryset)
+            grouped = {}
+            for spec in specs:
+                section = spec.section
+                if section not in grouped:
+                    grouped[section] = []
+                grouped[section].append(ProductSpecificationSerializer(spec).data)
+
+            all_sections = list(grouped.keys())
+            for section in SPEC_SECTIONS:
+                if section not in all_sections:
+                    all_sections.append(section)
+
+            result = []
+            for section in all_sections:
+                result.append({
+                    "section": section,
+                    "specs": grouped.get(section, [])
+                })
+            return Response(result)
+
         return self.paginate(request, queryset, ProductSpecificationSerializer)
 
     def post(self, request):
-        serializer = ProductSpecificationSerializer(data=request.data)
+        """
+        Accepts EITHER a single spec object OR a list for bulk create/update.
+
+        Single:
+        { "product": 1, "section": "Processor", "key": "Model", "value": "i5-1235U" }
+
+        Bulk list:
+        [
+          { "product": 1, "section": "Processor", "key": "Model", "value": "i5-1235U" },
+          { "product": 1, "section": "Memory", "key": "RAM", "value": "8GB" }
+        ]
+        """
+        data = request.data
+
+        if isinstance(data, list):
+            return self._bulk_create(data)
+
+        serializer = ProductSpecificationSerializer(data=data)
         serializer.is_valid(raise_exception=True)
-        serializer.save()
+        try:
+            serializer.save()
+        except IntegrityError:
+            return Response(
+                {
+                    "error": (
+                        f"A specification with key \"{data.get('key')}\" already exists "
+                        f"in section \"{data.get('section')}\" for this product. "
+                        "Use PUT to update it instead."
+                    )
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    def _bulk_create(self, data_list):
+        if not isinstance(data_list, list) or len(data_list) == 0:
+            return Response(
+                {"error": "Provide a non-empty list of specification objects."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        created_specs = []
+        updated_specs = []
+        errors = []
+
+        try:
+            with transaction.atomic():
+                for idx, item in enumerate(data_list):
+                    serializer = ProductSpecificationSerializer(data=item)
+                    if not serializer.is_valid():
+                        errors.append({"index": idx, "errors": serializer.errors})
+                        continue
+
+                    product = serializer.validated_data["product"]
+                    section = serializer.validated_data["section"]
+                    key = serializer.validated_data["key"]
+                    value = serializer.validated_data["value"]
+
+                    spec, created = ProductSpecification.objects.update_or_create(
+                        product=product,
+                        section=section,
+                        key=key,
+                        defaults={"value": value},
+                    )
+                    result = ProductSpecificationSerializer(spec).data
+                    if created:
+                        created_specs.append(result)
+                    else:
+                        updated_specs.append(result)
+
+        except Exception as e:
+            logger.error(f"Error in bulk specification save: {e}", exc_info=True)
+            return Response(
+                {"error": "Failed to save specifications. Please try again."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        response_data = {
+            "created": len(created_specs),
+            "updated": len(updated_specs),
+            "specs": created_specs + updated_specs,
+        }
+
+        if errors:
+            response_data["validation_errors"] = errors
+            return Response(response_data, status=status.HTTP_207_MULTI_STATUS)
+
+        return Response(response_data, status=status.HTTP_201_CREATED)
 
 
 class ProductSpecificationDetailAPIView(APIView):
@@ -690,17 +793,70 @@ class ProductSpecificationDetailAPIView(APIView):
 
     def put(self, request, pk):
         spec = get_object_or_404(ProductSpecification, pk=pk)
+        # Pass instance= so UniqueTogetherValidator excludes the current record,
+        # otherwise editing an existing spec always throws "already exists".
         serializer = ProductSpecificationSerializer(
-            spec, data=request.data, partial=True)
+            spec,
+            data=request.data,
+            partial=True,
+        )
         serializer.is_valid(raise_exception=True)
-        serializer.save()
+        try:
+            serializer.save()
+        except IntegrityError:
+            return Response(
+                {
+                    "error": (
+                        "A specification with that key already exists in this section. "
+                        "Please use a different key name."
+                    )
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
         return Response(serializer.data)
 
     def delete(self, request, pk):
         spec = get_object_or_404(ProductSpecification, pk=pk)
+        section = spec.section
+        key = spec.key
         spec.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        return Response(
+            {"message": f"Specification \"{key}\" removed from section \"{section}\"."},
+            status=status.HTTP_200_OK,
+        )
 
+
+class ProductSpecificationBulkDeleteAPIView(APIView):
+    """
+    DELETE /products/specifications/bulk/delete/
+    Body: { "ids": [1, 2, 3] }
+    Deletes all specs with those IDs in one request.
+    """
+    permission_classes = [IsAdminUser]
+
+    def delete(self, request):
+        ids = request.data.get("ids", [])
+        if not ids or not isinstance(ids, list):
+            return Response(
+                {"error": "Provide a non-empty list of spec IDs to delete."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        deleted_count, _ = ProductSpecification.objects.filter(pk__in=ids).delete()
+        return Response(
+            {"message": f"{deleted_count} specification(s) deleted successfully."},
+            status=status.HTTP_200_OK,
+        )
+
+
+class ProductSpecificationSectionsAPIView(APIView):
+    """
+    GET /products/specifications/sections/
+    Returns the predefined list of section names for the frontend dropdown.
+    """
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        return Response({"sections": SPEC_SECTIONS})
 
 
 class BulkProductUploadAPIView(APIView):
