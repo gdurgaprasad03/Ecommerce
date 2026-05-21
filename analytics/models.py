@@ -53,6 +53,7 @@ class AnalyticsSnapshot(models.Model):
     def __str__(self):
         return f"Analytics Snapshot - {self.created_at.strftime('%Y-%m-%d %H:%M')}"
 
+
 class ProductAnalytics(models.Model):
     product_id = models.IntegerField(db_index=True)
     product_name = models.CharField(max_length=255)
@@ -82,6 +83,7 @@ class ProductAnalytics(models.Model):
 
     def __str__(self):
         return f"{self.product_name} - {self.total_views} views"
+
 
 class AnalyticsManager:
     @staticmethod
@@ -119,15 +121,18 @@ class AnalyticsManager:
         week_start = today_start - timedelta(days=7)
         month_start = today_start - timedelta(days=30)
 
-        users = User.objects.all()
+        # Only count verified customers — excludes staff/admin and
+        # unverified registrations (is_active=False = OTP never completed)
+        customers = User.objects.filter(is_active=True, is_staff=False)
+
         data = {
-            "total_users": users.count(),
-            "active_today": users.filter(last_login__gte=today_start).count(),
-            "active_this_week": users.filter(last_login__gte=week_start).count(),
-            "active_this_month": users.filter(last_login__gte=month_start).count(),
-            "new_users_today": users.filter(date_joined__gte=today_start).count(),
-            "new_users_this_week": users.filter(date_joined__gte=week_start).count(),
-            "new_users_this_month": users.filter(date_joined__gte=month_start).count(),
+            "total_users": customers.count(),
+            "active_today": customers.filter(last_login__gte=today_start).count(),
+            "active_this_week": customers.filter(last_login__gte=week_start).count(),
+            "active_this_month": customers.filter(last_login__gte=month_start).count(),
+            "new_users_today": customers.filter(date_joined__gte=today_start).count(),
+            "new_users_this_week": customers.filter(date_joined__gte=week_start).count(),
+            "new_users_this_month": customers.filter(date_joined__gte=month_start).count(),
         }
         CacheManager.set_cache(cache_key, data, timeout=1800)
         return data
@@ -166,21 +171,34 @@ class AnalyticsManager:
         from wishlist.models import Wishlist
         from products.models import Product
 
-        wishlists = Wishlist.objects.all()
-        if wishlists.exists():
+        # Only count wishlists that actually have at least one product.
+        # Empty wishlist rows are auto-created on first GET by any logged-in
+        # user — counting them inflates the metric with zero-product rows.
+        active_wishlists = Wishlist.objects.annotate(
+            product_count=Count('products')
+        ).filter(product_count__gt=0)
+
+        total_active = active_wishlists.count()
+
+        if total_active > 0:
             most_wishlisted = Product.objects.annotate(
                 wishlist_count=Count('in_wishlists')
-            ).order_by('-wishlist_count').first()
-            avg_size = wishlists.annotate(
-                size=Count('products')
-            ).aggregate(Avg('size'))['size__avg'] or 0
+            ).filter(wishlist_count__gt=0).order_by('-wishlist_count').first()
+
+            avg_size = (
+                active_wishlists.aggregate(Avg('product_count'))['product_count__avg'] or 0
+            )
+            total_items = (
+                active_wishlists.aggregate(Sum('product_count'))['product_count__sum'] or 0
+            )
         else:
             most_wishlisted = None
             avg_size = 0
+            total_items = 0
 
         data = {
-            "total_wishlists": wishlists.count(),
-            "total_items": sum(w.products.count() for w in wishlists),
+            "total_wishlists": total_active,
+            "total_items": total_items,
             "average_wishlist_size": round(avg_size, 2),
             "most_wishlisted_product": most_wishlisted.name if most_wishlisted else None,
         }
@@ -220,14 +238,20 @@ class AnalyticsManager:
             "counts": {
                 "total_categories": Category.objects.filter(is_active=True).count(),
                 "total_products": Product.objects.filter(is_active=True).count(),
+                # Only verified customers — no staff, no unverified OTP registrations
+                "total_customers": User.objects.filter(is_active=True, is_staff=False).count(),
                 "total_inventory_items": Inventory.objects.count(),
                 "total_requests": CustomerRequest.objects.count(),
-                "pending_requests": CustomerRequest.objects.filter(status=CustomerRequest.STATUS_PENDING).count(),
+                "pending_requests": CustomerRequest.objects.filter(
+                    status=CustomerRequest.STATUS_PENDING
+                ).count(),
             },
             "alerts": {
                 "low_stock_products": [
                     {"id": i.product.id, "name": i.product.name, "stock": i.stock}
-                    for i in Inventory.objects.select_related("product").filter(stock__lte=low_stock_threshold)[:5]
+                    for i in Inventory.objects.select_related("product").filter(
+                        stock__lte=low_stock_threshold
+                    )[:5]
                 ],
             },
             "performance": {
@@ -237,15 +261,24 @@ class AnalyticsManager:
                 ],
                 "top_rated": [
                     {"id": p.id, "name": p.name, "rating": p.rating}
-                    for p in Product.objects.filter(is_active=True, rating__gte=4.0).order_by("-rating")[:5]
+                    for p in Product.objects.filter(
+                        is_active=True, rating__gte=4.0
+                    ).order_by("-rating")[:5]
                 ],
             },
             "recent": {
                 "requests": [
-                    {"id": r.id, "name": r.name, "product": r.product.name if r.product else None, "status": r.status}
-                    for r in CustomerRequest.objects.select_related("product").order_by("-created_at")[:5]
+                    {
+                        "id": r.id,
+                        "name": r.name,
+                        "product": r.product.name if r.product else None,
+                        "status": r.status,
+                    }
+                    for r in CustomerRequest.objects.select_related("product").order_by(
+                        "-created_at"
+                    )[:5]
                 ]
-            }
+            },
         }
 
     @staticmethod
