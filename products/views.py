@@ -639,9 +639,29 @@ class ProductImageDetailAPIView(APIView):
         return Response(serializer.data)
 
     def delete(self, request, pk):
-        image_obj = get_object_or_404(ProductImage, pk=pk)
+        image_obj = get_object_or_404(
+            ProductImage.objects.select_related("product"), pk=pk
+        )
+        product_id = image_obj.product_id
+        product_name = image_obj.product.name
+
         image_obj.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
+
+        # Clear product detail cache so next GET reflects the deletion
+        # immediately instead of serving stale cached images for 5 min.
+        try:
+            from core.cache_utils import CacheManager
+            CacheManager.delete_cache(f"product:{product_id}:public")
+            CacheManager.delete_cache(f"product_images:{product_id}")
+            CacheManager.clear_product_list_cache()
+            logger.info(f"Cache cleared after image delete for product {product_id}")
+        except Exception as e:
+            logger.error(f"Cache clear failed after image delete: {e}", exc_info=True)
+
+        return Response(
+            {"message": f"Image removed from {product_name} successfully."},
+            status=status.HTTP_200_OK,
+        )
 
 
 class ProductSpecificationListAPIView(PaginatedAPIView):
