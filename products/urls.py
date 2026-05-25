@@ -1,4 +1,5 @@
 from django.urls import path
+
 from .views import (
     AutocompleteAPIView, BrandAPIView, BrandDetailAPIView,
     BulkProductUploadAPIView, CategoryAPIView, CategoryDetailAPIView,
@@ -6,6 +7,7 @@ from .views import (
     ProductImageListAPIView, ProductListAPIView,
     ProductSpecificationDetailAPIView, ProductSpecificationListAPIView,
     ProductSpecificationBulkDeleteAPIView, ProductSpecificationSectionsAPIView,
+    ProductImageDeleteAPIView,
     RecentlyViewedProductsAPIView,
     SearchFacetsAPIView, SimilarProductsAPIView, SubCategoryAPIView,
     SubCategoryDetailAPIView,
@@ -31,6 +33,7 @@ urlpatterns = [
     path("products/recently-viewed/", RecentlyViewedProductsAPIView.as_view(), name="recently-viewed"),
 
     path("images/", ProductImageListAPIView.as_view(), name="image-list-create"),
+    path("products/<int:product_id>/images/<int:image_id>/", ProductImageDeleteAPIView.as_view(), name="product-image-delete"),
     path("images/<int:pk>/", ProductImageDetailAPIView.as_view(), name="image-detail"),
 
     path("specifications/", ProductSpecificationListAPIView.as_view(), name="spec-list-create"),

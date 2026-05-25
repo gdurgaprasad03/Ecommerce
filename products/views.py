@@ -912,3 +912,39 @@ class BulkProductUploadAPIView(APIView):
                 {"error": str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
+
+class ProductImageDeleteAPIView(APIView):
+    """
+    DELETE /products/products/{product_id}/images/{image_id}/
+    Deletes a specific image from a specific product.
+    Verifies the image belongs to the product before deleting.
+    """
+    permission_classes = [IsAdminUser]
+
+    def delete(self, request, product_id, image_id):
+        # Verify product exists
+        product = get_object_or_404(Product, pk=product_id)
+
+        # Verify image belongs to THIS product — prevents deleting
+        # another product image by guessing IDs
+        image_obj = get_object_or_404(
+            ProductImage, pk=image_id, product=product
+        )
+
+        image_obj.delete()
+
+        # Clear cache immediately so next GET reflects the deletion
+        try:
+            from core.cache_utils import CacheManager
+            CacheManager.delete_cache(f"product:{product_id}:public")
+            CacheManager.delete_cache(f"product_images:{product_id}")
+            CacheManager.clear_product_list_cache()
+            logger.info(f"Cache cleared after image {image_id} delete for product {product_id}")
+        except Exception as e:
+            logger.error(f"Cache clear failed after image delete: {e}", exc_info=True)
+
+        return Response(
+            {"message": f"Image deleted from {product.name} successfully."},
+            status=status.HTTP_200_OK,
+        )
