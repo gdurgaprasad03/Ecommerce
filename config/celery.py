@@ -23,6 +23,9 @@ app.conf.task_routes = {
     'core.tasks.send_wishlist_reminder_email': {'queue': 'emails'},
     'core.tasks.notify_stock_low': {'queue': 'alerts'},
     'core.tasks.generate_analytics_snapshot': {'queue': 'analytics'},
+    'core.tasks.send_customer_request_email': {'queue': 'emails'},   
+    'core.tasks.send_enquiry_email': {'queue': 'emails'},            
+    'core.tasks.send_quote_status_email': {'queue': 'emails'},
 }
 
 @app.task(bind=True)
