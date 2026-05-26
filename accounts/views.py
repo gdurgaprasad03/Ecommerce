@@ -2,7 +2,7 @@ import logging
 from datetime import timedelta, datetime
 from django.conf import settings
 from django.contrib.auth import authenticate
-from django.contrib.auth.models import User
+from django.contrib.auth.models import User, update_last_login
 from django.core.cache import cache
 from django.db import transaction
 from django.utils import timezone
@@ -295,6 +295,8 @@ class LoginAPIView(APIView):
             return Response({"error": "Invalid credentials."}, status=status.HTTP_401_UNAUTHORIZED)
         if not user.is_active:
             return Response({"error": "Account is not active."}, status=status.HTTP_403_FORBIDDEN)
+
+        update_last_login(None, user)
 
         refresh = RefreshToken.for_user(user)
         return Response({
