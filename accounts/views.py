@@ -1,8 +1,9 @@
 import logging
-from datetime import timedelta
+from datetime import timedelta, datetime
 from django.conf import settings
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
+from django.core.cache import cache
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import status
@@ -17,7 +18,7 @@ from .serializers import (
     CustomerRegistrationSerializer, LoginSerializer, OTPResendSerializer,
     OTPVerifySerializer, PasswordResetConfirmSerializer, PasswordResetRequestSerializer
 )
-from core.utils.helpers import build_reset_text, generate_otp
+from core.utils.helpers import build_reset_text, generate_otp, safe_send_mail
 from core.tasks import send_otp_email_task
 
 logger = logging.getLogger(__name__)
@@ -38,73 +39,70 @@ class CustomerRegistrationAPIView(APIView):
         validated_data = serializer.validated_data
         email = validated_data["email"].strip().lower()
         username = validated_data.get("username", "").strip() or email
+        password = validated_data["password"]
+        first_name = validated_data.get("first_name", "").strip()
+        last_name = validated_data.get("last_name", "").strip()
         company_name = validated_data["company_name"].strip()
         company_address = validated_data["company_address"].strip()
 
-        with transaction.atomic():
-            user = (
-                User.objects.select_for_update()
-                .filter(email__iexact=email)
-                .first()
-            )
+        # Check if active user with this email already exists
+        existing_active_user = User.objects.filter(email__iexact=email, is_active=True).first()
+        if existing_active_user:
+            return Response({"error": "User with this email already exists."}, status=status.HTTP_400_BAD_REQUEST)
 
-            if user:
-                if user.is_active:
-                    return Response({"error": "User with this email already exists."}, status=status.HTTP_400_BAD_REQUEST)
-
-                user.username = username
-                user.set_password(validated_data["password"])
-                user.first_name = validated_data.get("first_name", "").strip()
-                user.last_name = validated_data.get("last_name", "").strip()
-                user.save(update_fields=["username", "password", "first_name", "last_name"])
-
-                profile, _ = CustomerProfile.objects.get_or_create(user=user)
-                profile.company_name = company_name
-                profile.company_address = company_address
-                profile.save(update_fields=["company_name", "company_address", "updated_at"])
-
-            else:
-                user = User.objects.create_user(
-                    username=username,
-                    email=email,
-                    password=validated_data["password"],
-                    first_name=validated_data.get("first_name", "").strip(),
-                    last_name=validated_data.get("last_name", "").strip(),
-                )
-                user.is_active = False
-                user.save(update_fields=["is_active"])
-
-                CustomerProfile.objects.create(user=user, company_name=company_name, company_address=company_address)
-
-            now = timezone.now()
-            otp_verification, created_ov = OTPVerification.objects.select_for_update().get_or_create(
-                user=user,
-                defaults={
-                    "otp": generate_otp(),
-                    "expires_at": now + timedelta(minutes=OTP_EXPIRY_MINUTES),
-                },
-            )
-
-            if not created_ov:
-                if (now - otp_verification.last_sent_at).total_seconds() < OTP_RESEND_COOLDOWN_SECONDS:
-                    return Response({"error": f"Please wait {OTP_RESEND_COOLDOWN_SECONDS} seconds before requesting another OTP."}, status=status.HTTP_429_TOO_MANY_REQUESTS)
-                otp_verification.otp = generate_otp()
-                otp_verification.attempts = 0
-                otp_verification.expires_at = now + timedelta(minutes=OTP_EXPIRY_MINUTES)
-                otp_verification.last_sent_at = now
-                otp_verification.is_verified = False
-                otp_verification.verified_at = None
-                otp_verification.save()
-
-            otp = otp_verification.otp
-
-        send_otp_email_task.delay(
-            "Your OTP for Registration",
-            f"Your OTP is {otp}. It expires in {OTP_EXPIRY_MINUTES} minutes.",
-            [email],
+        # Store registration data in cache temporarily (until OTP verification)
+        cache_key = f"pending_registration:{email}"
+        cache_data = {
+            "username": username,
+            "password": password,
+            "email": email,
+            "first_name": first_name,
+            "last_name": last_name,
+            "company_name": company_name,
+            "company_address": company_address,
+        }
+        
+        # Generate OTP
+        otp = generate_otp()
+        cache.set(
+            cache_key,
+            {
+                **cache_data,
+                "otp": otp,
+                "attempts": 0,
+                "expires_at": (timezone.now() + timedelta(minutes=OTP_EXPIRY_MINUTES)).isoformat(),
+            },
+            timeout=OTP_EXPIRY_MINUTES * 60,
         )
 
-        return Response({"message": "Registration successful. Please verify the OTP sent to your email."}, status=status.HTTP_201_CREATED)
+        # Send OTP email synchronously (critical path - must succeed)
+        try:
+            sent = safe_send_mail(
+                "Your OTP for Registration",
+                f"Your OTP is {otp}. It expires in {OTP_EXPIRY_MINUTES} minutes.",
+                [email],
+            )
+            if not sent:
+                cache.delete(cache_key)
+                return Response(
+                    {"error": "Failed to send OTP email. Please try again."},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
+        except Exception as exc:
+            logger.error(f"Registration OTP email failed for {email}: {exc}")
+            cache.delete(cache_key)
+            return Response(
+                {"error": "Failed to send OTP email. Please try again."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        return Response(
+            {
+                "message": "Registration successful. Please verify the OTP sent to your email.",
+                "email": email,
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
 class VerifyOTPAPIView(APIView):
     permission_classes = [AllowAny]
@@ -119,33 +117,94 @@ class VerifyOTPAPIView(APIView):
         email = serializer.validated_data["email"].strip().lower()
         otp = serializer.validated_data["otp"]
 
-        user = User.objects.filter(email__iexact=email).first()
-        if not user:
-            return Response({"error": "No pending registration found for this email."}, status=status.HTTP_400_BAD_REQUEST)
+        # Get pending registration from cache
+        cache_key = f"pending_registration:{email}"
+        registration_data = cache.get(cache_key)
 
-        otp_verification = OTPVerification.objects.filter(user=user).first()
-        if not otp_verification or otp_verification.is_verified:
-            return Response({"error": "No pending registration found or account already verified."}, status=status.HTTP_400_BAD_REQUEST)
+        if not registration_data:
+            return Response(
+                {"error": "No pending registration found for this email."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        if otp_verification.is_expired():
-            return Response({"error": "OTP has expired. Please register again."}, status=status.HTTP_400_BAD_REQUEST)
+        # Check OTP expiry
+        expires_at = datetime.fromisoformat(registration_data["expires_at"])
+        if timezone.now() >= expires_at:
+            cache.delete(cache_key)
+            return Response(
+                {"error": "OTP has expired. Please register again."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        if otp_verification.attempts >= OTP_MAX_ATTEMPTS:
-            return Response({"error": "Maximum OTP attempts exceeded. Please register again."}, status=status.HTTP_429_TOO_MANY_REQUESTS)
+        # Check max attempts
+        if registration_data.get("attempts", 0) >= OTP_MAX_ATTEMPTS:
+            cache.delete(cache_key)
+            return Response(
+                {"error": "Maximum OTP attempts exceeded. Please register again."},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
 
-        if otp_verification.otp != otp:
-            otp_verification.attempts += 1
-            otp_verification.save(update_fields=["attempts"])
+        # Verify OTP
+        if registration_data["otp"] != otp:
+            registration_data["attempts"] = registration_data.get("attempts", 0) + 1
+            cache.set(
+                cache_key,
+                registration_data,
+                timeout=OTP_EXPIRY_MINUTES * 60,
+            )
             return Response({"error": "Invalid OTP."}, status=status.HTTP_400_BAD_REQUEST)
 
+        # Create user in database after OTP verification
         with transaction.atomic():
-            user.is_active = True
-            user.save(update_fields=["is_active"])
-            otp_verification.is_verified = True
-            otp_verification.verified_at = timezone.now()
-            otp_verification.save()
+            user, created = User.objects.get_or_create(
+                email__iexact=email,
+                defaults={
+                    "username": registration_data["username"],
+                    "email": email,
+                    "first_name": registration_data["first_name"],
+                    "last_name": registration_data["last_name"],
+                    "is_active": True,
+                },
+            )
 
-        return Response({"message": "OTP verified successfully. You can now log in."}, status=status.HTTP_200_OK)
+            if not created:
+                # User already exists (race condition), activate if needed
+                if not user.is_active:
+                    user.is_active = True
+                    user.save(update_fields=["is_active"])
+            else:
+                # Set password for newly created user
+                user.set_password(registration_data["password"])
+                user.save(update_fields=["password"])
+
+            # Create customer profile
+            profile, _ = CustomerProfile.objects.get_or_create(
+                user=user,
+                defaults={
+                    "company_name": registration_data["company_name"],
+                    "company_address": registration_data["company_address"],
+                },
+            )
+
+            # Create OTP verification record for history
+            OTPVerification.objects.update_or_create(
+                user=user,
+                defaults={
+                    "otp": otp,
+                    "is_verified": True,
+                    "verified_at": timezone.now(),
+                    "attempts": registration_data.get("attempts", 0),
+                    "expires_at": expires_at,
+                },
+            )
+
+        # Clear cache
+        cache.delete(cache_key)
+
+        return Response(
+            {"message": "OTP verified successfully. Your account is now active. You can now log in."},
+            status=status.HTTP_200_OK,
+        )
 
 class ResendOTPAPIView(APIView):
     permission_classes = [AllowAny]
@@ -156,33 +215,61 @@ class ResendOTPAPIView(APIView):
         serializer = OTPResendSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         email = serializer.validated_data["email"].strip().lower()
-        user = User.objects.filter(email__iexact=email).first()
 
-        if not user or user.is_active:
-            return Response({"error": "No pending registration found for this email."}, status=status.HTTP_404_NOT_FOUND)
+        # Check cache for pending registration
+        cache_key = f"pending_registration:{email}"
+        registration_data = cache.get(cache_key)
 
-        otp_verification = OTPVerification.objects.filter(user=user).first()
-        if not otp_verification:
-             otp_verification = OTPVerification.objects.create(user=user, otp=generate_otp(), expires_at=timezone.now() + timedelta(minutes=OTP_EXPIRY_MINUTES))
+        if not registration_data:
+            return Response(
+                {"error": "No pending registration found for this email."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
 
         now = timezone.now()
-        if (now - otp_verification.last_sent_at).total_seconds() < OTP_RESEND_COOLDOWN_SECONDS:
-            return Response({"error": f"Please wait {OTP_RESEND_COOLDOWN_SECONDS} seconds before requesting another OTP."}, status=status.HTTP_429_TOO_MANY_REQUESTS)
+        expires_at = datetime.fromisoformat(registration_data["expires_at"])
 
-        otp = generate_otp()
-        otp_verification.otp = otp
-        otp_verification.attempts = 0
-        otp_verification.expires_at = now + timedelta(minutes=OTP_EXPIRY_MINUTES)
-        otp_verification.last_sent_at = now
-        otp_verification.is_verified = False
-        otp_verification.save()
+        # Check if OTP has expired
+        if now >= expires_at:
+            cache.delete(cache_key)
+            return Response(
+                {"error": "OTP has expired. Please register again."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
+        # Check cooldown
+        last_sent = registration_data.get("last_sent_at")
+        if last_sent:
+            last_sent_time = datetime.fromisoformat(last_sent)
+            if (now - last_sent_time).total_seconds() < OTP_RESEND_COOLDOWN_SECONDS:
+                return Response(
+                    {"error": f"Please wait {OTP_RESEND_COOLDOWN_SECONDS} seconds before requesting another OTP."},
+                    status=status.HTTP_429_TOO_MANY_REQUESTS,
+                )
+
+        # Generate new OTP
+        new_otp = generate_otp()
+        registration_data["otp"] = new_otp
+        registration_data["attempts"] = 0
+        registration_data["last_sent_at"] = now.isoformat()
+        registration_data["expires_at"] = (now + timedelta(minutes=OTP_EXPIRY_MINUTES)).isoformat()
+
+        cache.set(
+            cache_key,
+            registration_data,
+            timeout=OTP_EXPIRY_MINUTES * 60,
+        )
+
+        # Send OTP email asynchronously (resend is not critical)
         send_otp_email_task.delay(
             "Your New OTP for Registration",
-            f"Your OTP is {otp}. It expires in {OTP_EXPIRY_MINUTES} minutes.",
+            f"Your OTP is {new_otp}. It expires in {OTP_EXPIRY_MINUTES} minutes.",
             [email],
         )
-        return Response({"message": "A new OTP has been sent to your email."}, status=status.HTTP_200_OK)
+        return Response(
+            {"message": "A new OTP has been sent to your email."},
+            status=status.HTTP_200_OK,
+        )
 
 class LoginAPIView(APIView):
     permission_classes = [AllowAny]
