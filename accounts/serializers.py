@@ -5,8 +5,10 @@ from rest_framework import serializers
 import re
 from core.utils.serializers import SanitizedModelSerializer
 from .validators import validate_password_complexity
+from .models import CustomerProfile
 
 logger = logging.getLogger(__name__)
+
 
 class CustomerRegistrationSerializer(SanitizedModelSerializer):
     password = serializers.CharField(write_only=True, min_length=8, max_length=128)
@@ -20,15 +22,8 @@ class CustomerRegistrationSerializer(SanitizedModelSerializer):
     class Meta:
         model = User
         fields = [
-            "username",
-            "email",
-            "password",
-            "confirm_password",
-            "first_name",
-            "last_name",
-            "company_name",
-            "company_address",
-            "phone",
+            "username", "email", "password", "confirm_password",
+            "first_name", "last_name", "company_name", "company_address", "phone",
         ]
 
     def validate_email(self, value):
@@ -38,10 +33,10 @@ class CustomerRegistrationSerializer(SanitizedModelSerializer):
             domain = value.split('@')[1].lower() if '@' in value else ""
             if domain in disposable_domains:
                 raise serializers.ValidationError("Disposable email addresses are not allowed")
-
-            if User.objects.filter(email__iexact=value).exclude(id=self.instance.id if self.instance else None).exists():
+            if User.objects.filter(email__iexact=value).exclude(
+                id=self.instance.id if self.instance else None
+            ).exists():
                 raise serializers.ValidationError("User with this email already exists")
-
             return value
         except serializers.ValidationError:
             raise
@@ -60,18 +55,10 @@ class CustomerRegistrationSerializer(SanitizedModelSerializer):
         return value
 
     def validate_company_name(self, value):
-        try:
-            return value.strip()
-        except Exception as e:
-            logger.error(f"Error validating company name: {str(e)}", exc_info=True)
-            raise serializers.ValidationError("Invalid company name.")
+        return value.strip()
 
     def validate_company_address(self, value):
-        try:
-            return value.strip()
-        except Exception as e:
-            logger.error(f"Error validating company address: {str(e)}", exc_info=True)
-            raise serializers.ValidationError("Invalid company address.")
+        return value.strip()
 
     def validate(self, attrs):
         try:
@@ -87,7 +74,9 @@ class CustomerRegistrationSerializer(SanitizedModelSerializer):
             if existing_user and existing_user.is_active:
                 raise serializers.ValidationError({"email": "User with this email already exists."})
 
-            username_exists = User.objects.filter(username__iexact=username).exclude(email__iexact=email).first()
+            username_exists = User.objects.filter(
+                username__iexact=username
+            ).exclude(email__iexact=email).first()
             if username_exists:
                 raise serializers.ValidationError({"username": "This username is already taken."})
 
@@ -95,15 +84,14 @@ class CustomerRegistrationSerializer(SanitizedModelSerializer):
             attrs["username"] = username
             attrs["company_name"] = attrs["company_name"].strip()
             attrs["company_address"] = attrs["company_address"].strip()
-
             attrs.pop("confirm_password", None)
-
             return attrs
         except serializers.ValidationError:
             raise
         except Exception as e:
             logger.error(f"Error validating registration data: {str(e)}", exc_info=True)
             raise serializers.ValidationError("Error validating registration data.")
+
 
 class OTPVerifySerializer(serializers.Serializer):
     email = serializers.EmailField()
@@ -115,10 +103,8 @@ class OTPVerifySerializer(serializers.Serializer):
             otp = attrs.get("otp") or attrs.get("code")
             if not otp:
                 raise serializers.ValidationError({"otp": "OTP is required."})
-
             if not otp.isdigit():
                 raise serializers.ValidationError({"otp": "OTP must contain only digits."})
-
             attrs["otp"] = otp
             return attrs
         except serializers.ValidationError:
@@ -127,8 +113,10 @@ class OTPVerifySerializer(serializers.Serializer):
             logger.error(f"Error validating OTP: {str(e)}", exc_info=True)
             raise serializers.ValidationError("Error validating OTP.")
 
+
 class OTPResendSerializer(serializers.Serializer):
     email = serializers.EmailField()
+
 
 class LoginSerializer(serializers.Serializer):
     username = serializers.CharField(required=False, allow_blank=True, max_length=150)
@@ -139,10 +127,8 @@ class LoginSerializer(serializers.Serializer):
         try:
             login_id = (attrs.get("username") or attrs.get("email") or "").strip()
             password = attrs.get("password", "").strip()
-
             if not login_id or not password:
                 raise serializers.ValidationError("Username/email and password are required.")
-
             attrs["login_id"] = login_id
             attrs["password"] = password
             return attrs
@@ -152,8 +138,10 @@ class LoginSerializer(serializers.Serializer):
             logger.error(f"Error validating login data: {str(e)}", exc_info=True)
             raise serializers.ValidationError("Error validating login data.")
 
+
 class PasswordResetRequestSerializer(serializers.Serializer):
     email = serializers.EmailField()
+
 
 class PasswordResetConfirmSerializer(serializers.Serializer):
     email = serializers.EmailField()
@@ -167,13 +155,10 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
             otp = attrs.get("otp") or attrs.get("code")
             if not otp:
                 raise serializers.ValidationError({"otp": "OTP is required."})
-
             if not otp.isdigit():
                 raise serializers.ValidationError({"otp": "OTP must contain only digits."})
-
             if attrs.get("new_password") != attrs.get("confirm_password"):
                 raise serializers.ValidationError({"confirm_password": "Passwords do not match."})
-
             attrs["otp"] = otp
             return attrs
         except serializers.ValidationError:
@@ -191,3 +176,62 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
                 raise serializers.ValidationError(e.messages)
             raise serializers.ValidationError(str(e))
         return value
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Profile serializers
+# ─────────────────────────────────────────────────────────────────────────────
+
+class CustomerProfileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CustomerProfile
+        fields = ["company_name", "company_address", "phone"]
+
+
+class ProfileUpdateSerializer(serializers.Serializer):
+    """Accepts partial updates to user + profile fields."""
+    first_name = serializers.CharField(required=False, max_length=150, allow_blank=True)
+    last_name = serializers.CharField(required=False, max_length=150, allow_blank=True)
+    company_name = serializers.CharField(required=False, max_length=255)
+    company_address = serializers.CharField(required=False, max_length=1000)
+    phone = serializers.CharField(required=False, max_length=20, allow_blank=True)
+
+
+class EnquiryHistorySerializer(serializers.Serializer):
+    """Read-only serializer for enquiry history in profile."""
+    id = serializers.IntegerField()
+    product_name = serializers.SerializerMethodField()
+    product_id = serializers.SerializerMethodField()
+    company_name = serializers.CharField()
+    quantity = serializers.IntegerField()
+    description = serializers.CharField()
+    status = serializers.SerializerMethodField()
+    created_at = serializers.DateTimeField()
+
+    def get_product_name(self, obj):
+        return obj.product.name if obj.product else "General Enquiry"
+
+    def get_product_id(self, obj):
+        return obj.product.id if obj.product else None
+
+    def get_status(self, obj):
+        # Enquiry has no status field — always "Submitted"
+        return "submitted"
+
+
+class QuoteRequestHistorySerializer(serializers.Serializer):
+    """Read-only serializer for quote request history in profile."""
+    id = serializers.IntegerField()
+    product_name = serializers.SerializerMethodField()
+    product_id = serializers.SerializerMethodField()
+    quantity = serializers.IntegerField()
+    description = serializers.CharField()
+    status = serializers.CharField()
+    created_at = serializers.DateTimeField()
+    updated_at = serializers.DateTimeField()
+
+    def get_product_name(self, obj):
+        return obj.product.name if obj.product else "N/A"
+
+    def get_product_id(self, obj):
+        return obj.product.id if obj.product else None

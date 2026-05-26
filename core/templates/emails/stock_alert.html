@@ -1,16 +1,148 @@
-<h2>Great News! {{ product_name }} is Back in Stock!</h2>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Low Stock Alert</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f4f6f9;font-family:Arial,Helvetica,sans-serif;">
 
-<p>We're excited to let you know that <strong>{{ product_name }}</strong>, which you added to your wishlist, is now back in stock!</p>
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f6f9;padding:30px 0;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
 
-<p>This popular item tends to sell out quickly, so we recommend checking it out soon.</p>
+          <!-- Header -->
+          <tr>
+            <td style="background-color:#1a1a2e;padding:28px 36px;">
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td>
+                    <span style="color:#fbc61d;font-size:22px;font-weight:900;letter-spacing:1px;">NxSys Digital</span>
+                  </td>
+                  <td align="right">
+                    <span style="background-color:#ef4444;color:#ffffff;font-size:10px;font-weight:900;padding:5px 12px;border-radius:20px;letter-spacing:1px;text-transform:uppercase;">Low Stock</span>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
 
-<p><a href="{{ product_url }}" style="background-color: #28a745; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">View Product</a></p>
+          <!-- Alert Banner -->
+          <tr>
+            <td style="background-color:#fff5f5;padding:16px 36px;border-bottom:3px solid #ef4444;">
+              <p style="margin:0;font-size:15px;font-weight:700;color:#1a1a2e;">
+                ⚠️ &nbsp; Low Stock Alert — Immediate Action Required
+              </p>
+              <p style="margin:4px 0 0;font-size:12px;color:#666;">
+                Detected on: {{ detected_at }}
+              </p>
+            </td>
+          </tr>
 
-<p>Stock availability can change quickly. Don't miss out!</p>
+          <!-- Body -->
+          <tr>
+            <td style="padding:32px 36px;">
 
-<p>Best regards,<br>The E-Commerce Team</p>
+              <!-- Product Details -->
+              <p style="margin:0 0 16px;font-size:13px;font-weight:900;text-transform:uppercase;letter-spacing:1px;color:#888;">Product Details</p>
+              <table width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;border-radius:8px;overflow:hidden;margin-bottom:24px;">
+                <tr>
+                  <td style="padding:12px 20px;border-bottom:1px solid #eee;">
+                    <span style="font-size:12px;color:#888;display:block;">Product Name</span>
+                    <span style="font-size:14px;font-weight:700;color:#1a1a2e;">{{ product_name }}</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:12px 20px;border-bottom:1px solid #eee;">
+                    <span style="font-size:12px;color:#888;display:block;">Product ID</span>
+                    <span style="font-size:14px;font-weight:700;color:#1a1a2e;">#{{ product_id }}</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:12px 20px;border-bottom:1px solid #eee;">
+                    <span style="font-size:12px;color:#888;display:block;">Current Stock</span>
+                    <span style="font-size:20px;font-weight:900;color:#ef4444;">{{ stock }} units</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:12px 20px;">
+                    <span style="font-size:12px;color:#888;display:block;">Alert Threshold</span>
+                    <span style="font-size:14px;font-weight:700;color:#1a1a2e;">{{ threshold }} units</span>
+                  </td>
+                </tr>
+              </table>
 
-<p style="font-size: 12px; color: #666; margin-top: 30px;">
-    You received this email because you have this item in your wishlist. 
-    <a href="{{ frontend_url }}/settings/notifications">Manage your notification preferences</a>
-</p>
+              <!-- Action Items -->
+              <p style="margin:0 0 16px;font-size:13px;font-weight:900;text-transform:uppercase;letter-spacing:1px;color:#888;">Recommended Actions</p>
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+                <tr>
+                  <td style="padding:8px 0;">
+                    <table cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td style="width:6px;height:6px;background-color:#fbc61d;border-radius:50%;vertical-align:middle;"></td>
+                        <td style="padding-left:12px;font-size:13px;color:#333;">Check supplier inventory and place a reorder.</td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:8px 0;">
+                    <table cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td style="width:6px;height:6px;background-color:#fbc61d;border-radius:50%;vertical-align:middle;"></td>
+                        <td style="padding-left:12px;font-size:13px;color:#333;">Notify the sales team if this product has pending enquiries.</td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:8px 0;">
+                    <table cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td style="width:6px;height:6px;background-color:#fbc61d;border-radius:50%;vertical-align:middle;"></td>
+                        <td style="padding-left:12px;font-size:13px;color:#333;">Consider marking the product as inactive until restocked.</td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- CTAs -->
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td align="center" style="padding-bottom:12px;">
+                    <a href="{{ admin_product_url }}" style="display:inline-block;background-color:#fbc61d;color:#1a1a2e;font-size:12px;font-weight:900;padding:14px 36px;border-radius:6px;text-decoration:none;letter-spacing:1px;text-transform:uppercase;">
+                      View Product in Admin
+                    </a>
+                  </td>
+                </tr>
+                <tr>
+                  <td align="center">
+                    <a href="{{ admin_inventory_url }}" style="display:inline-block;background-color:transparent;color:#1a1a2e;font-size:12px;font-weight:700;padding:12px 36px;border-radius:6px;text-decoration:none;border:2px solid #e0e0e0;">
+                      Manage Inventory
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color:#f4f6f9;padding:20px 36px;border-top:1px solid #eee;text-align:center;">
+              <p style="margin:0;font-size:11px;color:#aaa;">
+                This is an automated alert from NxSys Digital inventory system.<br/>
+                Please do not reply to this email.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+
+</body>
+</html>

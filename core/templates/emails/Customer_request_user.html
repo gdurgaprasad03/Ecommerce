@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Quote Request Received</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f4f6f9;font-family:Arial,Helvetica,sans-serif;">
+
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f6f9;padding:30px 0;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+
+          <!-- Header -->
+          <tr>
+            <td style="background-color:#1a1a2e;padding:28px 36px;">
+              <span style="color:#fbc61d;font-size:22px;font-weight:900;letter-spacing:1px;">NxSys Digital</span>
+            </td>
+          </tr>
+
+          <!-- Hero -->
+          <tr>
+            <td style="background-color:#fff8e1;padding:32px 36px;text-align:center;border-bottom:3px solid #fbc61d;">
+              <div style="font-size:40px;margin-bottom:12px;">✅</div>
+              <h1 style="margin:0;font-size:22px;font-weight:900;color:#1a1a2e;">Request Received!</h1>
+              <p style="margin:8px 0 0;font-size:14px;color:#555;line-height:1.6;">
+                Thank you, <strong>{{ customer_name }}</strong>. We've received your quote request and our team will get back to you shortly.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="padding:32px 36px;">
+
+              <!-- Request Summary -->
+              <p style="margin:0 0 16px;font-size:13px;font-weight:900;text-transform:uppercase;letter-spacing:1px;color:#888;">Your Request Summary</p>
+              <table width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;border-radius:8px;overflow:hidden;margin-bottom:28px;">
+                <tr>
+                  <td style="padding:12px 20px;border-bottom:1px solid #eee;">
+                    <span style="font-size:12px;color:#888;display:block;">Product</span>
+                    <span style="font-size:14px;font-weight:700;color:#1a1a2e;">{{ product_name }}</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:12px 20px;border-bottom:1px solid #eee;">
+                    <span style="font-size:12px;color:#888;display:block;">Quantity Requested</span>
+                    <span style="font-size:14px;font-weight:700;color:#1a1a2e;">{{ quantity }}</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:12px 20px;">
+                    <span style="font-size:12px;color:#888;display:block;">Submitted On</span>
+                    <span style="font-size:14px;font-weight:700;color:#1a1a2e;">{{ submitted_at }}</span>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- What's Next -->
+              <p style="margin:0 0 16px;font-size:13px;font-weight:900;text-transform:uppercase;letter-spacing:1px;color:#888;">What Happens Next?</p>
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+                <tr>
+                  <td style="padding:10px 0;vertical-align:top;">
+                    <table cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td style="width:32px;height:32px;background-color:#fbc61d;border-radius:50%;text-align:center;vertical-align:middle;font-size:13px;font-weight:900;color:#1a1a2e;">1</td>
+                        <td style="padding-left:14px;font-size:13px;color:#333;line-height:1.5;">Our team reviews your request and checks product availability.</td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:10px 0;vertical-align:top;">
+                    <table cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td style="width:32px;height:32px;background-color:#fbc61d;border-radius:50%;text-align:center;vertical-align:middle;font-size:13px;font-weight:900;color:#1a1a2e;">2</td>
+                        <td style="padding-left:14px;font-size:13px;color:#333;line-height:1.5;">We prepare a personalised quote with pricing and lead time.</td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:10px 0;vertical-align:top;">
+                    <table cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td style="width:32px;height:32px;background-color:#fbc61d;border-radius:50%;text-align:center;vertical-align:middle;font-size:13px;font-weight:900;color:#1a1a2e;">3</td>
+                        <td style="padding-left:14px;font-size:13px;color:#333;line-height:1.5;">You'll receive the quote at <strong>{{ customer_email }}</strong> within 24–48 hours.</td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Contact Info -->
+              <div style="background:#f0f7ff;border-radius:8px;padding:16px 20px;text-align:center;">
+                <p style="margin:0;font-size:13px;color:#555;">
+                  Have questions? Reach us at &nbsp;
+                  <a href="mailto:sales@sriainfotech.com" style="color:#1a1a2e;font-weight:700;text-decoration:none;">sales@sriainfotech.com</a>
+                </p>
+              </div>
+
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color:#f4f6f9;padding:20px 36px;border-top:1px solid #eee;text-align:center;">
+              <p style="margin:0;font-size:11px;color:#aaa;">
+                © NxSys Digital · <a href="{{ frontend_url }}" style="color:#aaa;">nxsysdigital.com</a><br/>
+                This is an automated confirmation. Please do not reply to this email.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+
+</body>
+</html>

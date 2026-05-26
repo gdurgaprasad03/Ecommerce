@@ -1,22 +1,140 @@
-<h2>Welcome {{ user_name }}!</h2>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Welcome to NxSys Digital</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f4f6f9;font-family:Arial,Helvetica,sans-serif;">
 
-<p>Thank you for joining our e-commerce platform. We're thrilled to have you on board!</p>
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f6f9;padding:30px 0;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
 
-<p>Here's what you can now do:</p>
-<ul>
-    <li>Browse and search for thousands of products</li>
-    <li>Add products to your wishlist</li>
-    <li>Leave reviews and ratings on products you've purchased</li>
-    <li>Receive notifications about products you're interested in</li>
-    <li>Track your orders and manage your profile</li>
-</ul>
+          <!-- Header -->
+          <tr>
+            <td style="background-color:#1a1a2e;padding:28px 36px;">
+              <span style="color:#fbc61d;font-size:22px;font-weight:900;letter-spacing:1px;">NxSys Digital</span>
+            </td>
+          </tr>
 
-<p><a href="{{ frontend_url }}/products" style="background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">Start Browsing</a></p>
+          <!-- Hero -->
+          <tr>
+            <td style="background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%);padding:40px 36px;text-align:center;">
+              <div style="font-size:48px;margin-bottom:16px;">🎉</div>
+              <h1 style="margin:0;font-size:26px;font-weight:900;color:#ffffff;">Welcome aboard, {{ user_name }}!</h1>
+              <p style="margin:10px 0 0;font-size:14px;color:#aab4c8;line-height:1.7;">
+                Your account is now active. You have access to our full B2B technology catalog.
+              </p>
+            </td>
+          </tr>
 
-<p>If you have any questions or need assistance, feel free to reach out to our support team.</p>
+          <!-- Body -->
+          <tr>
+            <td style="padding:36px 36px 24px;">
 
-<p>Happy shopping!<br>The E-Commerce Team</p>
+              <p style="margin:0 0 24px;font-size:14px;color:#555;line-height:1.7;">
+                Hi <strong>{{ user_name }}</strong>, thank you for registering with NxSys Digital.
+                Here's what you can do with your account:
+              </p>
 
-<p style="font-size: 12px; color: #666; margin-top: 30px;">
-    This is an automated email. Please do not reply directly to this email.
-</p>
+              <!-- Features -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+                <tr>
+                  <td style="padding:10px 0;border-bottom:1px solid #f0f0f0;">
+                    <table cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td style="width:36px;font-size:20px;">🛒</td>
+                        <td style="padding-left:12px;">
+                          <strong style="font-size:14px;color:#1a1a2e;display:block;">Browse the Catalog</strong>
+                          <span style="font-size:12px;color:#888;">Access thousands of B2B technology products.</span>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:10px 0;border-bottom:1px solid #f0f0f0;">
+                    <table cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td style="width:36px;font-size:20px;">📋</td>
+                        <td style="padding-left:12px;">
+                          <strong style="font-size:14px;color:#1a1a2e;display:block;">Request a Quote</strong>
+                          <span style="font-size:12px;color:#888;">Get custom pricing for bulk orders.</span>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:10px 0;border-bottom:1px solid #f0f0f0;">
+                    <table cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td style="width:36px;font-size:20px;">❤️</td>
+                        <td style="padding-left:12px;">
+                          <strong style="font-size:14px;color:#1a1a2e;display:block;">Save to Wishlist</strong>
+                          <span style="font-size:12px;color:#888;">Track products you're interested in.</span>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:10px 0;">
+                    <table cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td style="width:36px;font-size:20px;">📊</td>
+                        <td style="padding-left:12px;">
+                          <strong style="font-size:14px;color:#1a1a2e;display:block;">Track Your Enquiries</strong>
+                          <span style="font-size:12px;color:#888;">View history of all your requests in your profile.</span>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- CTA -->
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td align="center">
+                    <a href="{{ frontend_url }}/products" style="display:inline-block;background-color:#fbc61d;color:#1a1a2e;font-size:12px;font-weight:900;padding:14px 40px;border-radius:6px;text-decoration:none;letter-spacing:1px;text-transform:uppercase;">
+                      Browse Products
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+            </td>
+          </tr>
+
+          <!-- Help -->
+          <tr>
+            <td style="padding:0 36px 32px;">
+              <div style="background:#f9fafb;border-radius:8px;padding:16px 20px;text-align:center;">
+                <p style="margin:0;font-size:13px;color:#666;">
+                  Need help? Contact us at &nbsp;
+                  <a href="mailto:sales@sriainfotech.com" style="color:#1a1a2e;font-weight:700;text-decoration:none;">sales@sriainfotech.com</a>
+                </p>
+              </div>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color:#f4f6f9;padding:20px 36px;border-top:1px solid #eee;text-align:center;">
+              <p style="margin:0;font-size:11px;color:#aaa;">
+                © NxSys Digital · <a href="{{ frontend_url }}" style="color:#aaa;text-decoration:none;">nxsysdigital.com</a><br/>
+                This is an automated email. Please do not reply directly.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+
+</body>
+</html>

@@ -4,7 +4,9 @@ from django.conf import settings
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User, update_last_login
 from django.core.cache import cache
+from django.core.mail import EmailMultiAlternatives
 from django.db import transaction
+from django.template.loader import render_to_string
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -13,10 +15,14 @@ from rest_framework.throttling import AnonRateThrottle, ScopedRateThrottle
 from rest_framework.views import APIView
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
+
 from .models import CustomerProfile, OTPVerification
 from .serializers import (
-    CustomerRegistrationSerializer, LoginSerializer, OTPResendSerializer,
-    OTPVerifySerializer, PasswordResetConfirmSerializer, PasswordResetRequestSerializer
+    CustomerProfileSerializer, CustomerRegistrationSerializer,
+    EnquiryHistorySerializer, LoginSerializer, OTPResendSerializer,
+    OTPVerifySerializer, PasswordResetConfirmSerializer,
+    PasswordResetRequestSerializer, ProfileUpdateSerializer,
+    QuoteRequestHistorySerializer,
 )
 from core.utils.helpers import build_reset_text, generate_otp, safe_send_mail
 from core.tasks import send_otp_email_task
@@ -26,6 +32,43 @@ logger = logging.getLogger(__name__)
 OTP_EXPIRY_MINUTES = getattr(settings, "OTP_EXPIRY_MINUTES", 10)
 OTP_MAX_ATTEMPTS = getattr(settings, "OTP_MAX_ATTEMPTS", 5)
 OTP_RESEND_COOLDOWN_SECONDS = getattr(settings, "OTP_RESEND_COOLDOWN_SECONDS", 60)
+
+
+def _send_otp_html_email(subject, email, otp, expiry_minutes, template_name, extra_context=None):
+    """
+    Send an OTP email with HTML template + plain text fallback.
+    Returns True on success, False on failure.
+    """
+    try:
+        context = {
+            "user_name": email.split("@")[0],
+            "email": email,
+            "otp": otp,
+            "expiry_minutes": expiry_minutes,
+            "frontend_url": getattr(settings, "FRONTEND_BASE_URL", ""),
+            **(extra_context or {}),
+        }
+        html_body = render_to_string(template_name, context)
+        plain_body = f"Your OTP is {otp}. It expires in {expiry_minutes} minutes."
+
+        msg = EmailMultiAlternatives(
+            subject=subject,
+            body=plain_body,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            to=[email],
+        )
+        msg.attach_alternative(html_body, "text/html")
+        msg.send()
+        return True
+    except Exception as exc:
+        logger.error(f"HTML OTP email failed for {email}: {exc}", exc_info=True)
+        # Fallback to plain text
+        return safe_send_mail(
+            subject,
+            f"Your OTP is {otp}. It expires in {expiry_minutes} minutes.",
+            [email],
+        )
+
 
 class CustomerRegistrationAPIView(APIView):
     permission_classes = [AllowAny]
@@ -44,30 +87,28 @@ class CustomerRegistrationAPIView(APIView):
         last_name = validated_data.get("last_name", "").strip()
         company_name = validated_data["company_name"].strip()
         company_address = validated_data["company_address"].strip()
+        phone = validated_data.get("phone", "").strip()
 
-        # Check if active user with this email already exists
         existing_active_user = User.objects.filter(email__iexact=email, is_active=True).first()
         if existing_active_user:
-            return Response({"error": "User with this email already exists."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"error": "User with this email already exists."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        # Store registration data in cache temporarily (until OTP verification)
         cache_key = f"pending_registration:{email}"
-        cache_data = {
-            "username": username,
-            "password": password,
-            "email": email,
-            "first_name": first_name,
-            "last_name": last_name,
-            "company_name": company_name,
-            "company_address": company_address,
-        }
-        
-        # Generate OTP
         otp = generate_otp()
         cache.set(
             cache_key,
             {
-                **cache_data,
+                "username": username,
+                "password": password,
+                "email": email,
+                "first_name": first_name,
+                "last_name": last_name,
+                "company_name": company_name,
+                "company_address": company_address,
+                "phone": phone,
                 "otp": otp,
                 "attempts": 0,
                 "expires_at": (timezone.now() + timedelta(minutes=OTP_EXPIRY_MINUTES)).isoformat(),
@@ -75,21 +116,16 @@ class CustomerRegistrationAPIView(APIView):
             timeout=OTP_EXPIRY_MINUTES * 60,
         )
 
-        # Send OTP email synchronously (critical path - must succeed)
-        try:
-            sent = safe_send_mail(
-                "Your OTP for Registration",
-                f"Your OTP is {otp}. It expires in {OTP_EXPIRY_MINUTES} minutes.",
-                [email],
-            )
-            if not sent:
-                cache.delete(cache_key)
-                return Response(
-                    {"error": "Failed to send OTP email. Please try again."},
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                )
-        except Exception as exc:
-            logger.error(f"Registration OTP email failed for {email}: {exc}")
+        # Send HTML OTP email (synchronous — critical path)
+        sent = _send_otp_html_email(
+            subject="Your OTP for Registration — NxSys Digital",
+            email=email,
+            otp=otp,
+            expiry_minutes=OTP_EXPIRY_MINUTES,
+            template_name="emails/otp_registration.html",
+            extra_context={"user_name": first_name or username},
+        )
+        if not sent:
             cache.delete(cache_key)
             return Response(
                 {"error": "Failed to send OTP email. Please try again."},
@@ -104,6 +140,7 @@ class CustomerRegistrationAPIView(APIView):
             status=status.HTTP_201_CREATED,
         )
 
+
 class VerifyOTPAPIView(APIView):
     permission_classes = [AllowAny]
     throttle_classes = [AnonRateThrottle, ScopedRateThrottle]
@@ -117,7 +154,6 @@ class VerifyOTPAPIView(APIView):
         email = serializer.validated_data["email"].strip().lower()
         otp = serializer.validated_data["otp"]
 
-        # Get pending registration from cache
         cache_key = f"pending_registration:{email}"
         registration_data = cache.get(cache_key)
 
@@ -127,7 +163,6 @@ class VerifyOTPAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Check OTP expiry
         expires_at = datetime.fromisoformat(registration_data["expires_at"])
         if timezone.now() >= expires_at:
             cache.delete(cache_key)
@@ -136,7 +171,6 @@ class VerifyOTPAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Check max attempts
         if registration_data.get("attempts", 0) >= OTP_MAX_ATTEMPTS:
             cache.delete(cache_key)
             return Response(
@@ -144,17 +178,11 @@ class VerifyOTPAPIView(APIView):
                 status=status.HTTP_429_TOO_MANY_REQUESTS,
             )
 
-        # Verify OTP
         if registration_data["otp"] != otp:
             registration_data["attempts"] = registration_data.get("attempts", 0) + 1
-            cache.set(
-                cache_key,
-                registration_data,
-                timeout=OTP_EXPIRY_MINUTES * 60,
-            )
+            cache.set(cache_key, registration_data, timeout=OTP_EXPIRY_MINUTES * 60)
             return Response({"error": "Invalid OTP."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Create user in database after OTP verification
         with transaction.atomic():
             user, created = User.objects.get_or_create(
                 email__iexact=email,
@@ -168,25 +196,22 @@ class VerifyOTPAPIView(APIView):
             )
 
             if not created:
-                # User already exists (race condition), activate if needed
                 if not user.is_active:
                     user.is_active = True
                     user.save(update_fields=["is_active"])
             else:
-                # Set password for newly created user
                 user.set_password(registration_data["password"])
                 user.save(update_fields=["password"])
 
-            # Create customer profile
-            profile, _ = CustomerProfile.objects.get_or_create(
+            CustomerProfile.objects.get_or_create(
                 user=user,
                 defaults={
                     "company_name": registration_data["company_name"],
                     "company_address": registration_data["company_address"],
+                    "phone": registration_data.get("phone", ""),
                 },
             )
 
-            # Create OTP verification record for history
             OTPVerification.objects.update_or_create(
                 user=user,
                 defaults={
@@ -198,13 +223,13 @@ class VerifyOTPAPIView(APIView):
                 },
             )
 
-        # Clear cache
         cache.delete(cache_key)
 
         return Response(
             {"message": "OTP verified successfully. Your account is now active. You can now log in."},
             status=status.HTTP_200_OK,
         )
+
 
 class ResendOTPAPIView(APIView):
     permission_classes = [AllowAny]
@@ -216,7 +241,6 @@ class ResendOTPAPIView(APIView):
         serializer.is_valid(raise_exception=True)
         email = serializer.validated_data["email"].strip().lower()
 
-        # Check cache for pending registration
         cache_key = f"pending_registration:{email}"
         registration_data = cache.get(cache_key)
 
@@ -229,7 +253,6 @@ class ResendOTPAPIView(APIView):
         now = timezone.now()
         expires_at = datetime.fromisoformat(registration_data["expires_at"])
 
-        # Check if OTP has expired
         if now >= expires_at:
             cache.delete(cache_key)
             return Response(
@@ -237,7 +260,6 @@ class ResendOTPAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Check cooldown
         last_sent = registration_data.get("last_sent_at")
         if last_sent:
             last_sent_time = datetime.fromisoformat(last_sent)
@@ -247,22 +269,15 @@ class ResendOTPAPIView(APIView):
                     status=status.HTTP_429_TOO_MANY_REQUESTS,
                 )
 
-        # Generate new OTP
         new_otp = generate_otp()
         registration_data["otp"] = new_otp
         registration_data["attempts"] = 0
         registration_data["last_sent_at"] = now.isoformat()
         registration_data["expires_at"] = (now + timedelta(minutes=OTP_EXPIRY_MINUTES)).isoformat()
+        cache.set(cache_key, registration_data, timeout=OTP_EXPIRY_MINUTES * 60)
 
-        cache.set(
-            cache_key,
-            registration_data,
-            timeout=OTP_EXPIRY_MINUTES * 60,
-        )
-
-        # Send OTP email asynchronously (resend is not critical)
         send_otp_email_task.delay(
-            "Your New OTP for Registration",
+            "Your New OTP for Registration — NxSys Digital",
             f"Your OTP is {new_otp}. It expires in {OTP_EXPIRY_MINUTES} minutes.",
             [email],
         )
@@ -270,6 +285,7 @@ class ResendOTPAPIView(APIView):
             {"message": "A new OTP has been sent to your email."},
             status=status.HTTP_200_OK,
         )
+
 
 class LoginAPIView(APIView):
     permission_classes = [AllowAny]
@@ -307,6 +323,7 @@ class LoginAPIView(APIView):
             "is_staff": user.is_staff,
         }, status=status.HTTP_200_OK)
 
+
 class PasswordResetRequestAPIView(APIView):
     permission_classes = [AllowAny]
     throttle_classes = [AnonRateThrottle, ScopedRateThrottle]
@@ -329,13 +346,21 @@ class PasswordResetRequestAPIView(APIView):
             otp_verification.verified_at = None
             otp_verification.save()
 
+            # Send HTML password reset email via Celery
             send_otp_email_task.delay(
-                "Password Reset OTP",
+                "Password Reset OTP — NxSys Digital",
                 build_reset_text(otp_verification.otp),
                 [email],
+                otp_verification.otp,        # pass otp for HTML template
+                OTP_EXPIRY_MINUTES,           # pass expiry for HTML template
+                "password_reset",             # template type flag
             )
 
-        return Response({"message": "If an account with that email exists, password reset details have been sent."}, status=status.HTTP_200_OK)
+        return Response(
+            {"message": "If an account with that email exists, password reset details have been sent."},
+            status=status.HTTP_200_OK,
+        )
+
 
 class PasswordResetConfirmAPIView(APIView):
     permission_classes = [AllowAny]
@@ -357,10 +382,16 @@ class PasswordResetConfirmAPIView(APIView):
 
         otp_verification = OTPVerification.objects.filter(user=user).first()
         if not otp_verification or otp_verification.is_expired():
-            return Response({"error": "OTP has expired. Please request a new password reset."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"error": "OTP has expired. Please request a new password reset."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         if otp_verification.attempts >= OTP_MAX_ATTEMPTS:
-            return Response({"error": "Maximum OTP attempts exceeded. Please request a new password reset."}, status=status.HTTP_429_TOO_MANY_REQUESTS)
+            return Response(
+                {"error": "Maximum OTP attempts exceeded. Please request a new password reset."},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
 
         if otp_verification.otp != otp:
             otp_verification.attempts += 1
@@ -375,18 +406,126 @@ class PasswordResetConfirmAPIView(APIView):
 
         return Response({"message": "Password reset successful."}, status=status.HTTP_200_OK)
 
+
 class LogoutAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
         refresh_token = request.data.get("refresh_token")
         if not refresh_token:
-            return Response({"error": "refresh_token is required."}, status=status.HTTP_400_BAD_REQUEST)
-
+            return Response(
+                {"error": "refresh_token is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         try:
             token = RefreshToken(refresh_token)
             token.blacklist()
         except TokenError:
-            return Response({"error": "Invalid or expired refresh token."}, status=status.HTTP_400_BAD_REQUEST)
-
+            return Response(
+                {"error": "Invalid or expired refresh token."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         return Response({"message": "Logout successful."}, status=status.HTTP_200_OK)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Profile API
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ProfileAPIView(APIView):
+    """
+    GET  /accounts/profile/  → return user info + profile + enquiry/request history
+    PUT  /accounts/profile/  → update name, company, address, phone
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+
+        # Get or create profile
+        profile, _ = CustomerProfile.objects.get_or_create(
+            user=user,
+            defaults={"company_name": "", "company_address": "", "phone": ""},
+        )
+
+        # Fetch enquiry history by email
+        from orders.models import Enquiry, CustomerRequest
+        enquiries = Enquiry.objects.select_related("product").filter(
+            email__iexact=user.email
+        ).order_by("-created_at")[:20]
+
+        # Fetch quote request history by email
+        quote_requests = CustomerRequest.objects.select_related("product").filter(
+            email__iexact=user.email
+        ).order_by("-created_at")[:20]
+
+        return Response({
+            "user": {
+                "id": user.id,
+                "username": user.username,
+                "email": user.email,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "full_name": f"{user.first_name} {user.last_name}".strip() or user.username,
+                "date_joined": user.date_joined,
+                "last_login": user.last_login,
+                "is_staff": user.is_staff,
+            },
+            "profile": CustomerProfileSerializer(profile).data,
+            "enquiries": {
+                "count": enquiries.count(),
+                "results": EnquiryHistorySerializer(enquiries, many=True).data,
+            },
+            "quote_requests": {
+                "count": quote_requests.count(),
+                "results": QuoteRequestHistorySerializer(quote_requests, many=True).data,
+            },
+        })
+
+    def put(self, request):
+        user = request.user
+        serializer = ProfileUpdateSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        # Update User fields
+        user_fields_changed = False
+        if "first_name" in data:
+            user.first_name = data["first_name"]
+            user_fields_changed = True
+        if "last_name" in data:
+            user.last_name = data["last_name"]
+            user_fields_changed = True
+        if user_fields_changed:
+            user.save(update_fields=[f for f in ["first_name", "last_name"] if f in data])
+
+        # Update CustomerProfile fields
+        profile, _ = CustomerProfile.objects.get_or_create(
+            user=user,
+            defaults={"company_name": "", "company_address": "", "phone": ""},
+        )
+        profile_fields_changed = False
+        if "company_name" in data:
+            profile.company_name = data["company_name"]
+            profile_fields_changed = True
+        if "company_address" in data:
+            profile.company_address = data["company_address"]
+            profile_fields_changed = True
+        if "phone" in data:
+            profile.phone = data["phone"]
+            profile_fields_changed = True
+        if profile_fields_changed:
+            profile.save()
+
+        return Response({
+            "message": "Profile updated successfully.",
+            "user": {
+                "id": user.id,
+                "username": user.username,
+                "email": user.email,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "full_name": f"{user.first_name} {user.last_name}".strip() or user.username,
+            },
+            "profile": CustomerProfileSerializer(profile).data,
+        })

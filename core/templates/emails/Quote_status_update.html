@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Quote Update</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f4f6f9;font-family:Arial,Helvetica,sans-serif;">
+
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f6f9;padding:30px 0;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+
+          <!-- Header -->
+          <tr>
+            <td style="background-color:#1a1a2e;padding:28px 36px;">
+              <span style="color:#fbc61d;font-size:22px;font-weight:900;letter-spacing:1px;">NxSys Digital</span>
+            </td>
+          </tr>
+
+          <!-- Status Banner -->
+          <tr>
+            <td style="background-color:{{ status_bg_color }};padding:32px 36px;text-align:center;border-bottom:3px solid {{ status_border_color }};">
+              <div style="font-size:40px;margin-bottom:12px;">{{ status_icon }}</div>
+              <h1 style="margin:0;font-size:22px;font-weight:900;color:#1a1a2e;">{{ status_title }}</h1>
+              <p style="margin:8px 0 0;font-size:14px;color:#555;line-height:1.6;">
+                Dear <strong>{{ customer_name }}</strong>, your quote request has been updated.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="padding:32px 36px;">
+
+              <!-- Request Summary -->
+              <p style="margin:0 0 16px;font-size:13px;font-weight:900;text-transform:uppercase;letter-spacing:1px;color:#888;">Request Summary</p>
+              <table width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;border-radius:8px;overflow:hidden;margin-bottom:24px;">
+                <tr>
+                  <td style="padding:12px 20px;border-bottom:1px solid #eee;">
+                    <span style="font-size:12px;color:#888;display:block;">Product</span>
+                    <span style="font-size:14px;font-weight:700;color:#1a1a2e;">{{ product_name }}</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:12px 20px;border-bottom:1px solid #eee;">
+                    <span style="font-size:12px;color:#888;display:block;">Quantity Requested</span>
+                    <span style="font-size:14px;font-weight:700;color:#1a1a2e;">{{ quantity }}</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:12px 20px;border-bottom:1px solid #eee;">
+                    <span style="font-size:12px;color:#888;display:block;">Status</span>
+                    <span style="display:inline-block;background-color:{{ status_bg_color }};border:1px solid {{ status_border_color }};color:#1a1a2e;font-size:12px;font-weight:900;padding:4px 12px;border-radius:20px;">
+                      {{ status_label }}
+                    </span>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:12px 20px;">
+                    <span style="font-size:12px;color:#888;display:block;">Updated On</span>
+                    <span style="font-size:14px;font-weight:700;color:#1a1a2e;">{{ updated_at }}</span>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Status Message -->
+              <div style="background:#f9fafb;border-left:4px solid {{ status_border_color }};border-radius:0 8px 8px 0;padding:16px 20px;margin-bottom:24px;">
+                <p style="margin:0;font-size:14px;color:#333;line-height:1.7;">{{ status_message }}</p>
+              </div>
+
+              <!-- Contact -->
+              <div style="background:#f0f7ff;border-radius:8px;padding:16px 20px;text-align:center;">
+                <p style="margin:0;font-size:13px;color:#555;">
+                  Questions? Reply to this email or contact us at &nbsp;
+                  <a href="mailto:sales@sriainfotech.com" style="color:#1a1a2e;font-weight:700;text-decoration:none;">sales@sriainfotech.com</a>
+                </p>
+              </div>
+
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color:#f4f6f9;padding:20px 36px;border-top:1px solid #eee;text-align:center;">
+              <p style="margin:0;font-size:11px;color:#aaa;">
+                © NxSys Digital · <a href="{{ frontend_url }}" style="color:#aaa;text-decoration:none;">nxsysdigital.com</a><br/>
+                This is an automated notification. Please do not reply to this email.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+
+</body>
+</html>

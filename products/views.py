@@ -522,11 +522,6 @@ class ProductListAPIView(APIView):
                 Q(name__icontains=search_query) | Q(
                     description__icontains=search_query)
             )
-        
-        # Apply sort parameter
-        sort_param = search_params.get("sort", "-created_at")
-        queryset = queryset.order_by(sort_param)
-        
         paginator = PageNumberPagination()
         paginator.page_size = page_size
         page_obj = paginator.paginate_queryset(queryset, request)

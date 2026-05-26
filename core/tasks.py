@@ -17,33 +17,32 @@ logger = logging.getLogger(__name__)
 
 @shared_task(bind=True, max_retries=3)
 def send_welcome_email(self, user_id):
-    """Send welcome email to new user"""
+    """Send branded welcome email to new user"""
     try:
         user = User.objects.get(id=user_id)
-
-        subject = "Welcome to E-Commerce Platform!"
+        subject = "Welcome to NxSys Digital — Your Account is Ready!"
         context = {
             "user_name": user.first_name or user.username,
             "email": user.email,
-            "frontend_url": settings.FRONTEND_BASE_URL,
-            "verification_link": f"{settings.FRONTEND_BASE_URL}/verify-email",
+            "frontend_url": getattr(settings, "FRONTEND_BASE_URL", ""),
         }
-
         html_message = render_to_string("emails/welcome.html", context)
-        text_message = render_to_string("emails/welcome.txt", context)
-
-        email = EmailMultiAlternatives(
+        plain_message = (
+            f"Welcome {context['user_name']}!\n\n"
+            f"Your NxSys Digital account is now active.\n"
+            f"Browse products: {context['frontend_url']}/products\n\n"
+            f"Need help? sales@sriainfotech.com"
+        )
+        msg = EmailMultiAlternatives(
             subject=subject,
-            body=text_message,
+            body=plain_message,
             from_email=settings.DEFAULT_FROM_EMAIL,
             to=[user.email],
         )
-        email.attach_alternative(html_message, "text/html")
-        email.send()
-
+        msg.attach_alternative(html_message, "text/html")
+        msg.send()
         logger.info(f"Welcome email sent to {user.email}")
         return f"Welcome email sent to {user.email}"
-
     except User.DoesNotExist:
         logger.error(f"User {user_id} not found")
         return f"User {user_id} not found"
@@ -214,35 +213,45 @@ def send_wishlist_reminder_email(self, user_id):
 
 @shared_task(bind=True, max_retries=2)
 def notify_stock_low(self, product_id):
-    """Notify admin when product stock is low"""
+    """Notify admin when product stock is low — includes direct links to admin panel."""
     try:
         from products.models import Product
 
         product = Product.objects.get(id=product_id)
-        admin_email = settings.SALES_NOTIFICATION_EMAIL
+        admin_email = getattr(settings, "SALES_NOTIFICATION_EMAIL", "")
+        if not admin_email:
+            logger.warning("SALES_NOTIFICATION_EMAIL not set — skipping low stock alert")
+            return "Skipped: no admin email configured"
 
-        subject = f"Low Stock Alert: {product.name}"
+        frontend_url = getattr(settings, "FRONTEND_BASE_URL", "")
         context = {
             "product_name": product.name,
             "product_id": product.id,
             "stock": product.inventory.stock,
             "threshold": 10,
+            "detected_at": timezone.now().strftime("%d %b %Y, %I:%M %p"),
+            "admin_product_url": f"{frontend_url}/admin/products/{product.id}",
+            "admin_inventory_url": f"{frontend_url}/admin/inventory",
         }
 
         html_message = render_to_string("emails/admin_low_stock.html", context)
-        text_message = render_to_string("emails/admin_low_stock.txt", context)
-
-        email = EmailMultiAlternatives(
-            subject=subject,
-            body=text_message,
+        plain_message = (
+            f"LOW STOCK ALERT\n\n"
+            f"Product: {product.name} (ID: {product.id})\n"
+            f"Current Stock: {product.inventory.stock} units\n"
+            f"Threshold: 10 units\n\n"
+            f"Admin link: {context['admin_product_url']}"
+        )
+        msg = EmailMultiAlternatives(
+            subject=f"⚠️ Low Stock: {product.name} ({product.inventory.stock} units left)",
+            body=plain_message,
             from_email=settings.DEFAULT_FROM_EMAIL,
             to=[admin_email],
         )
-        email.attach_alternative(html_message, "text/html")
-        email.send()
-
+        msg.attach_alternative(html_message, "text/html")
+        msg.send()
         logger.warning(f"Low stock notification sent for {product.name}")
-        return f"Low stock notification sent"
+        return f"Low stock notification sent for {product.name}"
 
     except Exception as exc:
         logger.error(f"Error sending low stock notification: {str(exc)}")
@@ -250,11 +259,7 @@ def notify_stock_low(self, product_id):
 
 @shared_task(bind=True, max_retries=2)
 def check_stock_alerts(self):
-    """Periodic task to check and notify about back-in-stock items.
-
-    Uses a single grouped query instead of one Wishlist query per product
-    (N+1) so the cost stays bounded as the catalog grows.
-    """
+    """Periodic task to check and notify about back-in-stock items."""
     try:
         from collections import defaultdict
         from products.models import Product
@@ -361,8 +366,7 @@ def generate_analytics_snapshot():
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=30)
 def send_otp_email_task(self, subject, message, recipient_list):
-    """Send OTP/transactional emails asynchronously so login/registration
-    requests return immediately instead of blocking on SMTP."""
+    """Send OTP/transactional emails asynchronously."""
     from core.utils.helpers import safe_send_mail
     try:
         sent = safe_send_mail(subject, message, recipient_list)
@@ -390,58 +394,80 @@ def clean_expired_otps():
         logger.error(f"Error cleaning expired OTPs: {str(exc)}")
         return f"Error: {str(exc)}"
 
+
 @shared_task(bind=True, max_retries=3)
 def send_customer_request_email(self, request_id):
-    """Send customer request notification emails"""
+    """
+    Send HTML email notifications for a customer quote request.
+    - Admin gets full request details with a Reply button.
+    - Customer gets a confirmation with request summary and next steps.
+    """
     try:
         from orders.models import CustomerRequest
 
         customer_request = CustomerRequest.objects.select_related('product').get(id=request_id)
         product_name = customer_request.product.name if customer_request.product else "N/A"
+        submitted_at = customer_request.created_at.strftime("%d %b %Y, %I:%M %p")
 
-        admin_message = (
-            f"New customer inquiry received.\n\n"
-            f"Customer Name: {customer_request.name}\n"
-            f"Email: {customer_request.email}\n"
-            f"Phone: {customer_request.phone}\n"
-            f"Product: {product_name}\n"
-            f"Quantity: {customer_request.quantity}\n"
-            f"Description:\n{customer_request.description}"
-        )
+        context = {
+            "customer_name": customer_request.name,
+            "customer_email": customer_request.email,
+            "customer_phone": customer_request.phone,
+            "product_name": product_name,
+            "quantity": customer_request.quantity,
+            "description": customer_request.description or "",
+            "submitted_at": submitted_at,
+            "frontend_url": settings.FRONTEND_BASE_URL,
+        }
 
+        # ── Admin notification ──────────────────────────────────────────
         admin_email = getattr(settings, "SALES_NOTIFICATION_EMAIL", "")
         if admin_email:
             try:
-                from django.core.mail import send_mail
-                send_mail(
-                    f"New Product Request - {product_name}",
-                    admin_message,
-                    settings.DEFAULT_FROM_EMAIL,
-                    [admin_email],
-                    fail_silently=False,
+                html_body = render_to_string("emails/customer_request_admin.html", context)
+                plain_body = (
+                    f"New Quote Request\n\n"
+                    f"Customer: {customer_request.name}\n"
+                    f"Email: {customer_request.email}\n"
+                    f"Phone: {customer_request.phone}\n"
+                    f"Product: {product_name}\n"
+                    f"Quantity: {customer_request.quantity}\n"
+                    f"Notes: {customer_request.description or 'N/A'}\n"
+                    f"Submitted: {submitted_at}"
                 )
+                msg = EmailMultiAlternatives(
+                    subject=f"New Quote Request — {product_name}",
+                    body=plain_body,
+                    from_email=settings.DEFAULT_FROM_EMAIL,
+                    to=[admin_email],
+                )
+                msg.attach_alternative(html_body, "text/html")
+                msg.send()
                 logger.info(f"Admin notification sent for customer request {request_id}")
             except Exception as e:
                 logger.error(f"Failed to send admin notification: {str(e)}", exc_info=True)
 
-        customer_message = (
-            f"Dear {customer_request.name},\n\n"
-            f"Thank you for reaching out to us.\n"
-            f"We have successfully received your quote request for {product_name}.\n\n"
-            f"Our team will contact you soon with the pricing and further details.\n\n"
-            f"Best regards,\n"
-            f"Your Company Team"
-        )
-
+        # ── Customer confirmation ───────────────────────────────────────
         try:
-            from django.core.mail import send_mail
-            send_mail(
-                "We received your quote request",
-                customer_message,
-                settings.DEFAULT_FROM_EMAIL,
-                [customer_request.email],
-                fail_silently=False,
+            html_body = render_to_string("emails/customer_request_user.html", context)
+            plain_body = (
+                f"Dear {customer_request.name},\n\n"
+                f"Thank you for your quote request for {product_name}.\n"
+                f"Our team will contact you soon with pricing and further details.\n\n"
+                f"Request Summary:\n"
+                f"  Product  : {product_name}\n"
+                f"  Quantity : {customer_request.quantity}\n"
+                f"  Date     : {submitted_at}\n\n"
+                f"Best regards,\nNxSys Digital Team\nsales@sriainfotech.com"
             )
+            msg = EmailMultiAlternatives(
+                subject="We received your quote request — NxSys Digital",
+                body=plain_body,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                to=[customer_request.email],
+            )
+            msg.attach_alternative(html_body, "text/html")
+            msg.send()
             logger.info(f"Customer confirmation sent for request {request_id}")
         except Exception as e:
             logger.error(f"Failed to send customer confirmation: {str(e)}", exc_info=True)
@@ -455,46 +481,188 @@ def send_customer_request_email(self, request_id):
         logger.error(f"Error sending customer request emails: {str(exc)}", exc_info=True)
         raise self.retry(exc=exc, countdown=60)
 
+
 @shared_task(bind=True, max_retries=3)
-@shared_task(bind=True, max_retries=3, default_retry_delay=30)
 def send_enquiry_email(self, enquiry_id):
-    """Send admin notification for new enquiry (customer email sent synchronously in view)"""
+    """
+    Send HTML email notifications for a business enquiry.
+    - Admin gets full enquiry details with company info and a Reply button.
+    - Customer gets a confirmation with enquiry summary and next steps.
+    """
     try:
         from orders.models import Enquiry
-        from core.utils.helpers import safe_send_mail
 
         enquiry = Enquiry.objects.select_related('product').get(id=enquiry_id)
         product_name = enquiry.product.name if enquiry.product else "General Enquiry"
+        submitted_at = enquiry.created_at.strftime("%d %b %Y, %I:%M %p")
 
-        admin_message = (
-            f"New enquiry received.\n\n"
-            f"Name: {enquiry.name}\n"
-            f"Company Name: {enquiry.company_name}\n"
-            f"Company Address: {enquiry.company_address}\n"
-            f"Email: {enquiry.email}\n"
-            f"Phone: {enquiry.phone}\n"
-            f"Product: {product_name}\n"
-            f"Quantity: {enquiry.quantity}\n"
-            f"Description:\n{enquiry.description}"
-        )
+        context = {
+            "customer_name": enquiry.name,
+            "customer_email": enquiry.email,
+            "customer_phone": enquiry.phone,
+            "company_name": enquiry.company_name,
+            "company_address": enquiry.company_address,
+            "product_name": product_name,
+            "quantity": enquiry.quantity,
+            "description": enquiry.description or "",
+            "submitted_at": submitted_at,
+            "frontend_url": settings.FRONTEND_BASE_URL,
+        }
 
+        # ── Admin notification ──────────────────────────────────────────
         admin_email = getattr(settings, "SALES_NOTIFICATION_EMAIL", "")
         if admin_email:
             try:
-                safe_send_mail(
-                    f"New Enquiry - {product_name}",
-                    admin_message,
-                    [admin_email],
+                html_body = render_to_string("emails/enquiry_admin.html", context)
+                plain_body = (
+                    f"New Enquiry\n\n"
+                    f"Name: {enquiry.name}\n"
+                    f"Company: {enquiry.company_name}\n"
+                    f"Address: {enquiry.company_address}\n"
+                    f"Email: {enquiry.email}\n"
+                    f"Phone: {enquiry.phone}\n"
+                    f"Product: {product_name}\n"
+                    f"Quantity: {enquiry.quantity}\n"
+                    f"Message: {enquiry.description or 'N/A'}\n"
+                    f"Submitted: {submitted_at}"
                 )
+                msg = EmailMultiAlternatives(
+                    subject=f"New Enquiry — {product_name} | {enquiry.company_name}",
+                    body=plain_body,
+                    from_email=settings.DEFAULT_FROM_EMAIL,
+                    to=[admin_email],
+                )
+                msg.attach_alternative(html_body, "text/html")
+                msg.send()
                 logger.info(f"Admin notification sent for enquiry {enquiry_id}")
             except Exception as e:
                 logger.error(f"Failed to send admin notification: {str(e)}", exc_info=True)
 
-        return f"Admin notification sent for enquiry {enquiry_id}"
+        # ── Customer confirmation ───────────────────────────────────────
+        try:
+            html_body = render_to_string("emails/enquiry_user.html", context)
+            plain_body = (
+                f"Dear {enquiry.name},\n\n"
+                f"Thank you for contacting NxSys Digital.\n"
+                f"We have received your enquiry and our team will get in touch shortly.\n\n"
+                f"Enquiry Summary:\n"
+                f"  Company  : {enquiry.company_name}\n"
+                f"  Product  : {product_name}\n"
+                f"  Quantity : {enquiry.quantity}\n"
+                f"  Date     : {submitted_at}\n\n"
+                f"Best regards,\nNxSys Digital Team\nsales@sriainfotech.com"
+            )
+            msg = EmailMultiAlternatives(
+                subject="Thank you for your enquiry — NxSys Digital",
+                body=plain_body,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                to=[enquiry.email],
+            )
+            msg.attach_alternative(html_body, "text/html")
+            msg.send()
+            logger.info(f"Customer confirmation sent for enquiry {enquiry_id}")
+        except Exception as e:
+            logger.error(f"Failed to send customer confirmation: {str(e)}", exc_info=True)
+
+        return f"Emails sent for enquiry {enquiry_id}"
 
     except Enquiry.DoesNotExist:
         logger.error(f"Enquiry {enquiry_id} not found")
         return f"Enquiry {enquiry_id} not found"
     except Exception as exc:
-        logger.error(f"Error sending admin notification: {str(exc)}", exc_info=True)
-        raise self.retry(exc=exc)
+        logger.error(f"Error sending enquiry emails: {str(exc)}", exc_info=True)
+        raise self.retry(exc=exc, countdown=60)
+
+
+@shared_task(bind=True, max_retries=3)
+def send_quote_status_email(self, request_id, new_status):
+    """
+    Send a status update email to the customer when admin changes
+    a CustomerRequest status (pending → quote_sent or → closed).
+    """
+    try:
+        from orders.models import CustomerRequest
+
+        req = CustomerRequest.objects.select_related("product").get(id=request_id)
+        product_name = req.product.name if req.product else "N/A"
+        updated_at = req.updated_at.strftime("%d %b %Y, %I:%M %p")
+
+        STATUS_MAP = {
+            CustomerRequest.STATUS_PENDING: {
+                "title": "Your Request is Pending",
+                "label": "Pending",
+                "icon": "⏳",
+                "bg_color": "#fff8e1",
+                "border_color": "#fbc61d",
+                "message": (
+                    f"Your quote request for {product_name} has been received and is currently "
+                    f"under review. Our team will prepare a personalised quote for you shortly."
+                ),
+            },
+            CustomerRequest.STATUS_QUOTE_SENT: {
+                "title": "Your Quote is Ready!",
+                "label": "Quote Sent",
+                "icon": "📄",
+                "bg_color": "#f0fdf4",
+                "border_color": "#4ade80",
+                "message": (
+                    f"Great news! We have prepared a quote for {product_name} and our sales team "
+                    f"will be in touch with you shortly with pricing and availability details. "
+                    f"Please check your email or contact us at sales@sriainfotech.com."
+                ),
+            },
+            CustomerRequest.STATUS_CLOSED: {
+                "title": "Request Closed",
+                "label": "Closed",
+                "icon": "✅",
+                "bg_color": "#f0f4ff",
+                "border_color": "#818cf8",
+                "message": (
+                    f"Your request for {product_name} has been closed. "
+                    f"If you have any further questions or need assistance, "
+                    f"please don't hesitate to reach out to us at sales@sriainfotech.com."
+                ),
+            },
+        }
+
+        status_info = STATUS_MAP.get(new_status, STATUS_MAP[CustomerRequest.STATUS_PENDING])
+
+        context = {
+            "customer_name": req.name,
+            "product_name": product_name,
+            "quantity": req.quantity,
+            "updated_at": updated_at,
+            "status_title": status_info["title"],
+            "status_label": status_info["label"],
+            "status_icon": status_info["icon"],
+            "status_bg_color": status_info["bg_color"],
+            "status_border_color": status_info["border_color"],
+            "status_message": status_info["message"],
+            "frontend_url": getattr(settings, "FRONTEND_BASE_URL", ""),
+        }
+
+        html_body = render_to_string("emails/quote_status_update.html", context)
+        plain_body = (
+            f"Dear {req.name},\n\n"
+            f"Your quote request status has been updated.\n\n"
+            f"Product : {product_name}\n"
+            f"Quantity: {req.quantity}\n"
+            f"Status  : {status_info['label']}\n"
+            f"Updated : {updated_at}\n\n"
+            f"{status_info['message']}\n\n"
+            f"Best regards,\nNxSys Digital Team\nsales@sriainfotech.com"
+        )
+        msg = EmailMultiAlternatives(
+            subject=f"Quote Update: {status_info['title']} — {product_name}",
+            body=plain_body,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            to=[req.email],
+        )
+        msg.attach_alternative(html_body, "text/html")
+        msg.send()
+        logger.info(f"Quote status email sent to {req.email} for request {request_id} — {new_status}")
+        return f"Quote status email sent for request {request_id}"
+
+    except Exception as exc:
+        logger.error(f"Error sending quote status email for request {request_id}: {exc}", exc_info=True)
+        raise self.retry(exc=exc, countdown=60)
