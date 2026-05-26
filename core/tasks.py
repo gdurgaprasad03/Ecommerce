@@ -456,10 +456,12 @@ def send_customer_request_email(self, request_id):
         raise self.retry(exc=exc, countdown=60)
 
 @shared_task(bind=True, max_retries=3)
+@shared_task(bind=True, max_retries=3, default_retry_delay=30)
 def send_enquiry_email(self, enquiry_id):
-    """Send enquiry notification emails"""
+    """Send admin notification for new enquiry (customer email sent synchronously in view)"""
     try:
         from orders.models import Enquiry
+        from core.utils.helpers import safe_send_mail
 
         enquiry = Enquiry.objects.select_related('product').get(id=enquiry_id)
         product_name = enquiry.product.name if enquiry.product else "General Enquiry"
@@ -479,46 +481,20 @@ def send_enquiry_email(self, enquiry_id):
         admin_email = getattr(settings, "SALES_NOTIFICATION_EMAIL", "")
         if admin_email:
             try:
-                from django.core.mail import send_mail
-                send_mail(
+                safe_send_mail(
                     f"New Enquiry - {product_name}",
                     admin_message,
-                    settings.DEFAULT_FROM_EMAIL,
                     [admin_email],
-                    fail_silently=False,
                 )
                 logger.info(f"Admin notification sent for enquiry {enquiry_id}")
             except Exception as e:
                 logger.error(f"Failed to send admin notification: {str(e)}", exc_info=True)
 
-        customer_message = (
-            f"Dear {enquiry.name},\n\n"
-            f"Thank you for contacting us.\n"
-            f"We have received your enquiry and our team will get in touch with you shortly.\n\n"
-            f"Product: {product_name}\n"
-            f"Quantity: {enquiry.quantity}\n\n"
-            f"Best regards,\n"
-            f"Your Company Team"
-        )
-
-        try:
-            from django.core.mail import send_mail
-            send_mail(
-                "Thank you for your enquiry",
-                customer_message,
-                settings.DEFAULT_FROM_EMAIL,
-                [enquiry.email],
-                fail_silently=False,
-            )
-            logger.info(f"Customer confirmation sent for enquiry {enquiry_id}")
-        except Exception as e:
-            logger.error(f"Failed to send customer confirmation: {str(e)}", exc_info=True)
-
-        return f"Emails sent for enquiry {enquiry_id}"
+        return f"Admin notification sent for enquiry {enquiry_id}"
 
     except Enquiry.DoesNotExist:
         logger.error(f"Enquiry {enquiry_id} not found")
         return f"Enquiry {enquiry_id} not found"
     except Exception as exc:
-        logger.error(f"Error sending enquiry emails: {str(exc)}", exc_info=True)
-        raise self.retry(exc=exc, countdown=60)
+        logger.error(f"Error sending admin notification: {str(exc)}", exc_info=True)
+        raise self.retry(exc=exc)

@@ -94,10 +94,35 @@ class EnquiryAPIView(PaginatedAPIView):
 
             try:
                 enquiry = serializer.save()
+                
+                # Send customer confirmation email immediately (synchronous)
+                from core.utils.helpers import safe_send_mail
+                product_name = enquiry.product.name if enquiry.product else "General Enquiry"
+                customer_message = (
+                    f"Dear {enquiry.name},\n\n"
+                    f"Thank you for contacting us.\n"
+                    f"We have received your enquiry and our team will get in touch with you shortly.\n\n"
+                    f"Product: {product_name}\n"
+                    f"Quantity: {enquiry.quantity}\n\n"
+                    f"Best regards,\n"
+                    f"Your Company Team"
+                )
+                
+                try:
+                    safe_send_mail(
+                        "Thank you for your enquiry",
+                        customer_message,
+                        [enquiry.email],
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to send customer confirmation email: {str(e)}")
+                
+                # Send admin notification asynchronously (non-critical)
                 try:
                     send_enquiry_email.delay(enquiry.id)
                 except Exception as e:
                     logger.warning(f"Failed to queue enquiry email task: {str(e)}")
+                    
             except IntegrityError as e:
                 logger.error(f"Database error creating enquiry: {str(e)}", exc_info=True)
                 return Response(
@@ -111,7 +136,7 @@ class EnquiryAPIView(PaginatedAPIView):
                     status=status.HTTP_500_INTERNAL_SERVER_ERROR
                 )
 
-            return Response({"status": True, "message": "Enquiry submitted successfully."}, status=status.HTTP_201_CREATED)
+            return Response({"status": True, "message": "Enquiry submitted successfully. Confirmation email sent to your email address."}, status=status.HTTP_201_CREATED)
         except Exception as e:
             logger.error(f"Unexpected error creating enquiry: {str(e)}", exc_info=True)
             return Response(
