@@ -47,7 +47,10 @@ def cache_product_list(timeout=300):
                 logger.debug("Cache SKIPPED: Admin user - fetching fresh data")
                 return view_func(self, request, *args, **kwargs)
             
-            relevant_params = ["category", "subcategory", "top_selling", "featured", "new_arrival"]
+            relevant_params = [
+                "category", "subcategory", "top_selling", "featured", "new_arrival",
+                "page", "page_size",
+            ]
             cache_key = generate_cache_key("product_list", request, relevant_params)
             
             cached_payload = cache.get(cache_key)
