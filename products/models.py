@@ -1,3 +1,4 @@
+from django.contrib.postgres.indexes import GinIndex
 from django.db import models
 from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
@@ -99,6 +100,19 @@ class Product(models.Model):
             models.Index(fields=["is_active", "top_selling"]),
             models.Index(fields=["is_active", "new_arrival"]),
             models.Index(fields=["is_active", "created_at"]),
+            # Trigram GIN indexes make the case-insensitive ILIKE '%term%'
+            # DB-fallback search fast (a plain B-tree can't serve substring
+            # matches). Mirrors the Elasticsearch primary search path.
+            GinIndex(
+                fields=["name"],
+                name="product_name_trgm_idx",
+                opclasses=["gin_trgm_ops"],
+            ),
+            GinIndex(
+                fields=["description"],
+                name="product_desc_trgm_idx",
+                opclasses=["gin_trgm_ops"],
+            ),
         ]
         constraints = [
             models.UniqueConstraint(

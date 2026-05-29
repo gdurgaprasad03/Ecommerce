@@ -389,11 +389,18 @@ class PasswordResetConfirmAPIView(APIView):
 
         email = serializer.validated_data["email"].strip().lower()
         otp = serializer.validated_data["otp"]
+        old_password = serializer.validated_data["old_password"]
         new_password = serializer.validated_data["new_password"]
 
         user = User.objects.filter(email__iexact=email).first()
         if not user:
             return Response({"error": "Invalid email or OTP."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not user.check_password(old_password):
+            return Response(
+                {"error": "Old password is incorrect."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         otp_verification = OTPVerification.objects.filter(user=user).first()
         if not otp_verification or otp_verification.is_expired():

@@ -147,8 +147,8 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
     email = serializers.EmailField()
     otp = serializers.CharField(max_length=6, required=False, allow_blank=True)
     code = serializers.CharField(max_length=6, required=False, allow_blank=True)
+    old_password = serializers.CharField(write_only=True, required=True)
     new_password = serializers.CharField(write_only=True, min_length=8, max_length=128)
-    confirm_password = serializers.CharField(write_only=True, required=True)
 
     def validate(self, attrs):
         try:
@@ -157,8 +157,10 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
                 raise serializers.ValidationError({"otp": "OTP is required."})
             if not otp.isdigit():
                 raise serializers.ValidationError({"otp": "OTP must contain only digits."})
-            if attrs.get("new_password") != attrs.get("confirm_password"):
-                raise serializers.ValidationError({"confirm_password": "Passwords do not match."})
+            if attrs.get("old_password") == attrs.get("new_password"):
+                raise serializers.ValidationError(
+                    {"new_password": "New password must be different from the old password."}
+                )
             attrs["otp"] = otp
             return attrs
         except serializers.ValidationError:
