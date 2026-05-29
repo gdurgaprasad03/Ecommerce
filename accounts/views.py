@@ -24,7 +24,7 @@ from .serializers import (
     PasswordResetRequestSerializer, ProfileUpdateSerializer,
     QuoteRequestHistorySerializer,
 )
-from core.utils.helpers import build_reset_text, generate_otp, safe_send_mail
+from core.utils.helpers import generate_otp, safe_send_mail
 from core.tasks import send_otp_email_task
 
 logger = logging.getLogger(__name__)
@@ -312,7 +312,19 @@ class LoginAPIView(APIView):
         if not user.is_active:
             return Response({"error": "Account is not active."}, status=status.HTTP_403_FORBIDDEN)
 
+        # last_login is None until the first successful login — use it to send
+        # the welcome email exactly once, on the user's first login.
+        is_first_login = user.last_login is None
+
         update_last_login(None, user)
+
+        if is_first_login:
+            from core.tasks import send_welcome_email
+            try:
+                send_welcome_email.delay(user.id)
+                logger.info(f"Welcome email task queued on first login for user: {user.email}")
+            except Exception as e:
+                logger.error(f"Error queuing welcome email for user {user.id}: {str(e)}", exc_info=True)
 
         refresh = RefreshToken.for_user(user)
         return Response({
@@ -337,7 +349,10 @@ class PasswordResetRequestAPIView(APIView):
         user = User.objects.filter(email__iexact=email).first()
 
         if user:
-            otp_verification, _ = OTPVerification.objects.get_or_create(user=user)
+            otp_verification, _ = OTPVerification.objects.get_or_create(
+                user=user,
+                defaults={"expires_at": timezone.now() + timedelta(minutes=OTP_EXPIRY_MINUTES)},
+            )
             otp_verification.otp = generate_otp()
             otp_verification.attempts = 0
             otp_verification.expires_at = timezone.now() + timedelta(minutes=OTP_EXPIRY_MINUTES)
@@ -346,14 +361,14 @@ class PasswordResetRequestAPIView(APIView):
             otp_verification.verified_at = None
             otp_verification.save()
 
-            # Send HTML password reset email via Celery
-            send_otp_email_task.delay(
-                "Password Reset OTP — NxSys Digital",
-                build_reset_text(otp_verification.otp),
-                [email],
-                otp_verification.otp,        # pass otp for HTML template
-                OTP_EXPIRY_MINUTES,           # pass expiry for HTML template
-                "password_reset",             # template type flag
+            # Send HTML password reset email (synchronous — critical path,
+            # same pattern as registration OTP so the template is always rendered).
+            _send_otp_html_email(
+                subject="Password Reset OTP — NxSys Digital",
+                email=email,
+                otp=otp_verification.otp,
+                expiry_minutes=OTP_EXPIRY_MINUTES,
+                template_name="emails/password_reset.html",
             )
 
         return Response(

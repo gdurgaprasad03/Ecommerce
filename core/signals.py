@@ -166,15 +166,9 @@ def invalidate_product_review_cache(sender, instance, created, **kwargs):
     except Exception as e:
         logger.error(f"Error invalidating cache for product reviews: {str(e)}", exc_info=True)
 
-@receiver(post_save, sender=User)
-def send_welcome_email_on_user_creation(sender, instance, created, **kwargs):
-    if created:
-        from core.tasks import send_welcome_email
-        try:
-            send_welcome_email.apply_async(args=[instance.id], countdown=5)
-            logger.info(f"Welcome email task queued for user: {instance.email}")
-        except Exception as e:
-            logger.error(f"Error queuing welcome email for user {instance.id}: {str(e)}", exc_info=True)
+# NOTE: The welcome email is intentionally NOT sent on user creation.
+# It is queued on the user's first successful login instead
+# (see accounts.views.LoginAPIView, gated on user.last_login is None).
 
 @receiver(post_save, sender=Product)
 def index_product_in_elasticsearch(sender, instance, created, **kwargs):

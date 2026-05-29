@@ -141,6 +141,7 @@ class EnquiryAPIView(PaginatedAPIView):
 
             try:
                 enquiry = serializer.save()
+              
                 try:
                     send_enquiry_email.delay(enquiry.id)
                 except Exception as e:

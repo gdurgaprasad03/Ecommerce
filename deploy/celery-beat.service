@@ -1,0 +1,20 @@
+[Unit]
+Description=Celery Beat Scheduler (NxSys Digital) - periodic tasks (OTP cleanup, analytics, stock checks)
+After=network.target redis-server.service
+Requires=redis-server.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/sales/backend
+EnvironmentFile=/var/www/sales/backend/.env
+# -S django uses django-celery-beat (DB-backed schedule). Requires migrations to be applied.
+ExecStart=/var/www/sales/backend/venv/bin/celery -A config beat \
+    -l info \
+    -S django
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

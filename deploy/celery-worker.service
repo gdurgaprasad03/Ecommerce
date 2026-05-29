@@ -1,0 +1,25 @@
+[Unit]
+Description=Celery Worker (NxSys Digital) - sends emails (enquiry, OTP resend, welcome, stock alerts, etc.)
+After=network.target redis-server.service
+Requires=redis-server.service
+
+[Service]
+Type=simple
+# Adjust User/Group to the account that owns /var/www/sales (often www-data or a deploy user)
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/sales/backend
+EnvironmentFile=/var/www/sales/backend/.env
+ExecStart=/var/www/sales/backend/venv/bin/celery -A config worker \
+    -Q celery,emails,alerts,analytics \
+    -l info \
+    --concurrency=4 \
+    --max-tasks-per-child=200
+Restart=always
+RestartSec=5
+# Give in-flight emails time to finish on stop/restart
+TimeoutStopSec=30
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target
