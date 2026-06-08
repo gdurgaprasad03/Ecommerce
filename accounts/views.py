@@ -18,9 +18,9 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import CustomerProfile, OTPVerification
 from .serializers import (
-    CustomerProfileSerializer, CustomerRegistrationSerializer,
-    EnquiryHistorySerializer, LoginSerializer, OTPResendSerializer,
-    OTPVerifySerializer, PasswordResetConfirmSerializer,
+    ChangePasswordSerializer, CustomerProfileSerializer,
+    CustomerRegistrationSerializer, EnquiryHistorySerializer, LoginSerializer,
+    OTPResendSerializer, OTPVerifySerializer, PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer, ProfileUpdateSerializer,
     QuoteRequestHistorySerializer,
 )
@@ -377,6 +377,62 @@ class PasswordResetRequestAPIView(APIView):
         )
 
 
+class PasswordResetVerifyOTPAPIView(APIView):
+    """
+    Verify the OTP sent by PasswordResetRequestAPIView (forgot-password flow).
+
+    This is the reset-flow counterpart to VerifyOTPAPIView. It does NOT touch
+    the registration cache, so it never returns "No pending registration".
+    On success the OTP is marked verified and the frontend can proceed to
+    POST the new password to PasswordResetConfirmAPIView.
+
+    POST /accounts/verify-reset-otp/
+    Body: { "email": "...", "otp": "123456" }   ("code" is also accepted
+    """
+    permission_classes = [AllowAny]
+    throttle_classes = [AnonRateThrottle, ScopedRateThrottle]
+    throttle_scope = "password_reset"
+
+    def post(self, request):
+        serializer = OTPVerifySerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        email = serializer.validated_data["email"].strip().lower()
+        otp = serializer.validated_data["otp"]
+
+        user = User.objects.filter(email__iexact=email).first()
+        if not user:
+            return Response({"error": "Invalid email or OTP."}, status=status.HTTP_400_BAD_REQUEST)
+
+        otp_verification = OTPVerification.objects.filter(user=user).first()
+        if not otp_verification or otp_verification.is_expired():
+            return Response(
+                {"error": "OTP has expired. Please request a new password reset."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if otp_verification.attempts >= OTP_MAX_ATTEMPTS:
+            return Response(
+                {"error": "Maximum OTP attempts exceeded. Please request a new password reset."},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+
+        if otp_verification.otp != otp:
+            otp_verification.attempts += 1
+            otp_verification.save(update_fields=["attempts"])
+            return Response({"error": "Invalid email or OTP."}, status=status.HTTP_400_BAD_REQUEST)
+
+        otp_verification.is_verified = True
+        otp_verification.verified_at = timezone.now()
+        otp_verification.save(update_fields=["is_verified", "verified_at"])
+
+        return Response(
+            {"message": "OTP verified. You can now set a new password.", "email": email},
+            status=status.HTTP_200_OK,
+        )
+
+
 class PasswordResetConfirmAPIView(APIView):
     permission_classes = [AllowAny]
     throttle_classes = [AnonRateThrottle, ScopedRateThrottle]
@@ -420,6 +476,37 @@ class PasswordResetConfirmAPIView(APIView):
         otp_verification.save(update_fields=["is_verified", "verified_at"])
 
         return Response({"message": "Password reset successful."}, status=status.HTTP_200_OK)
+
+
+class ResetPasswordAPIView(APIView):
+    """
+    Authenticated 'reset password' flow for a logged-in user.
+    Requires the current password and a new password (with confirmation).
+    No OTP/email involved — that's the separate forgot-password flow.
+
+    POST /accounts/reset-password/
+    Body: { "old_password": "...", "new_password": "...", "confirm_password": "..." }
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = ChangePasswordSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        user = request.user
+        old_password = serializer.validated_data["old_password"]
+        new_password = serializer.validated_data["new_password"]
+
+        if not user.check_password(old_password):
+            return Response(
+                {"error": "Old password is incorrect."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user.set_password(new_password)
+        user.save(update_fields=["password"])
+
+        return Response({"message": "Password changed successfully."}, status=status.HTTP_200_OK)
 
 
 class LogoutAPIView(APIView):

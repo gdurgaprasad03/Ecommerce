@@ -178,6 +178,35 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
         return value
 
 
+class ChangePasswordSerializer(serializers.Serializer):
+    """
+    Authenticated 'reset password' flow: the logged-in user supplies their
+    current password plus a new password (with confirmation).
+    """
+    old_password = serializers.CharField(write_only=True, required=True)
+    new_password = serializers.CharField(write_only=True, min_length=8, max_length=128)
+    confirm_password = serializers.CharField(write_only=True, required=True)
+
+    def validate(self, attrs):
+        if attrs.get("new_password") != attrs.get("confirm_password"):
+            raise serializers.ValidationError({"confirm_password": "Passwords do not match."})
+        if attrs.get("old_password") == attrs.get("new_password"):
+            raise serializers.ValidationError(
+                {"new_password": "New password must be different from the old password."}
+            )
+        return attrs
+
+    def validate_new_password(self, value):
+        try:
+            validate_password_complexity(value)
+            django_validate_password(value)
+        except Exception as e:
+            if hasattr(e, 'messages'):
+                raise serializers.ValidationError(e.messages)
+            raise serializers.ValidationError(str(e))
+        return value
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Profile serializers
 # ─────────────────────────────────────────────────────────────────────────────
