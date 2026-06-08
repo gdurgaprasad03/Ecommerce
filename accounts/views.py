@@ -481,11 +481,11 @@ class PasswordResetConfirmAPIView(APIView):
 class ResetPasswordAPIView(APIView):
     """
     Authenticated 'reset password' flow for a logged-in user.
-    Requires the current password and a new password (with confirmation).
+    Requires the current password and a new password.
     No OTP/email involved — that's the separate forgot-password flow.
 
     POST /accounts/reset-password/
-    Body: { "old_password": "...", "new_password": "...", "confirm_password": "..." }
+    Body: { "old_password": "...", "new_password": "..." }
     """
     permission_classes = [IsAuthenticated]
 
