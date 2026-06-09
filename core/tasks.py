@@ -1,23 +1,29 @@
 """
-Celery tasks for Phase 2 - Email Notifications, Analytics & Background Jobs
-Handles asynchronous email sending, stock alerts, analytics generation
+Celery tasks — Email Notifications, Analytics & Background Jobs
+Handles all asynchronous email sending, stock alerts, analytics generation,
+and database keep-alive pings for Neon free tier cold-start prevention.
 """
 
 from celery import shared_task
-from django.core.mail import send_mail, EmailMultiAlternatives
+from django.core.mail import EmailMultiAlternatives
 from django.template.loader import render_to_string
 from django.utils import timezone
 from django.contrib.auth.models import User
 from django.conf import settings
-from django.db.models import Count, Q, Avg
-from datetime import timedelta, datetime
+from django.db.models import Count, Avg
+from datetime import timedelta
 import logging
 
 logger = logging.getLogger(__name__)
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Welcome Email
+# ─────────────────────────────────────────────────────────────────────────────
+
 @shared_task(bind=True, max_retries=3)
 def send_welcome_email(self, user_id):
-    """Send branded welcome email to new user"""
+    """Send branded HTML welcome email to a newly registered user."""
     try:
         user = User.objects.get(id=user_id)
         subject = "Welcome to NxSys Digital — Your Account is Ready!"
@@ -31,7 +37,7 @@ def send_welcome_email(self, user_id):
             f"Welcome {context['user_name']}!\n\n"
             f"Your NxSys Digital account is now active.\n"
             f"Browse products: {context['frontend_url']}/products\n\n"
-            f"Need help? sales@sriainfotech.com"
+            f"Need help? Contact us at sales@sriainfotech.com"
         )
         msg = EmailMultiAlternatives(
             subject=subject,
@@ -44,20 +50,23 @@ def send_welcome_email(self, user_id):
         logger.info(f"Welcome email sent to {user.email}")
         return f"Welcome email sent to {user.email}"
     except User.DoesNotExist:
-        logger.error(f"User {user_id} not found")
+        logger.error(f"User {user_id} not found — cannot send welcome email")
         return f"User {user_id} not found"
     except Exception as exc:
-        logger.error(f"Error sending welcome email: {str(exc)}")
+        logger.error(f"Error sending welcome email to user {user_id}: {str(exc)}", exc_info=True)
         raise self.retry(exc=exc, countdown=60)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Stock & Price Alerts
+# ─────────────────────────────────────────────────────────────────────────────
 
 @shared_task(bind=True, max_retries=3)
 def send_stock_alert_email(self, product_id, user_emails):
-    """Send stock alert email to interested users"""
+    """Notify interested users when a product comes back into stock."""
     try:
         from products.models import Product
-
         product = Product.objects.get(id=product_id)
-
         subject = f"Good news! {product.name} is back in stock!"
         context = {
             "product_name": product.name,
@@ -65,10 +74,8 @@ def send_stock_alert_email(self, product_id, user_emails):
             "product_url": f"{settings.FRONTEND_BASE_URL}/product/{product.id}",
             "frontend_url": settings.FRONTEND_BASE_URL,
         }
-
         html_message = render_to_string("emails/stock_alert.html", context)
         text_message = render_to_string("emails/stock_alert.txt", context)
-
         email = EmailMultiAlternatives(
             subject=subject,
             body=text_message,
@@ -77,24 +84,21 @@ def send_stock_alert_email(self, product_id, user_emails):
         )
         email.attach_alternative(html_message, "text/html")
         email.send()
-
-        logger.info(f"Stock alert sent for {product.name} to {len(user_emails)} users")
+        logger.info(f"Stock alert sent for '{product.name}' to {len(user_emails)} users")
         return f"Stock alert sent for {product.name}"
-
     except Exception as exc:
-        logger.error(f"Error sending stock alert email: {str(exc)}")
+        logger.error(f"Error sending stock alert for product {product_id}: {str(exc)}", exc_info=True)
         raise self.retry(exc=exc, countdown=60)
+
 
 @shared_task(bind=True, max_retries=3)
 def send_price_drop_email(self, product_id, user_emails, old_price, new_price):
-    """Send price drop notification email"""
+    """Notify users who wishlisted a product when its price drops."""
     try:
         from products.models import Product
-
         product = Product.objects.get(id=product_id)
         discount_percent = ((old_price - new_price) / old_price) * 100
-
-        subject = f"Price Drop Alert: {product.name} is now ${new_price}!"
+        subject = f"Price Drop Alert: {product.name} is now ₹{new_price}!"
         context = {
             "product_name": product.name,
             "old_price": old_price,
@@ -103,10 +107,8 @@ def send_price_drop_email(self, product_id, user_emails, old_price, new_price):
             "product_url": f"{settings.FRONTEND_BASE_URL}/product/{product.id}",
             "frontend_url": settings.FRONTEND_BASE_URL,
         }
-
         html_message = render_to_string("emails/price_drop.html", context)
         text_message = render_to_string("emails/price_drop.txt", context)
-
         email = EmailMultiAlternatives(
             subject=subject,
             body=text_message,
@@ -115,41 +117,41 @@ def send_price_drop_email(self, product_id, user_emails, old_price, new_price):
         )
         email.attach_alternative(html_message, "text/html")
         email.send()
-
-        logger.info(f"Price drop alert sent for {product.name} to {len(user_emails)} users")
-        return f"Price drop alert sent"
-
+        logger.info(f"Price drop alert sent for '{product.name}' to {len(user_emails)} users")
+        return f"Price drop alert sent for {product.name}"
     except Exception as exc:
-        logger.error(f"Error sending price drop email: {str(exc)}")
+        logger.error(f"Error sending price drop email for product {product_id}: {str(exc)}", exc_info=True)
         raise self.retry(exc=exc, countdown=60)
+
 
 @shared_task(bind=True, max_retries=3)
 def send_review_notification_email(self, review_id, product_id):
-    """Send notification email to product watchers when new review is posted"""
+    """Notify users who wishlisted a product when a new review is posted."""
     try:
         from products.models import Product
         from reviews.models import ProductReview
-
         product = Product.objects.get(id=product_id)
         review = ProductReview.objects.get(id=review_id)
-
-        subject = f"New Review: {product.name} - {review.rating}★"
+        subject = f"New Review: {product.name} — {review.rating}★"
         context = {
             "product_name": product.name,
             "reviewer_name": review.user.first_name or review.user.username,
             "rating": review.rating,
             "title": review.title,
-            "comment": review.comment[:200] + "..." if len(review.comment) > 200 else review.comment,
+            "comment": (
+                review.comment[:200] + "..."
+                if len(review.comment) > 200
+                else review.comment
+            ),
             "product_url": f"{settings.FRONTEND_BASE_URL}/product/{product.id}",
             "frontend_url": settings.FRONTEND_BASE_URL,
         }
-
         html_message = render_to_string("emails/review_notification.html", context)
         text_message = render_to_string("emails/review_notification.txt", context)
-
         from wishlist.models import Wishlist
-        wishlisted_users = Wishlist.objects.filter(products=product).values_list("user__email", flat=True)
-
+        wishlisted_users = Wishlist.objects.filter(
+            products=product
+        ).values_list("user__email", flat=True)
         if wishlisted_users:
             email = EmailMultiAlternatives(
                 subject=subject,
@@ -159,31 +161,27 @@ def send_review_notification_email(self, review_id, product_id):
             )
             email.attach_alternative(html_message, "text/html")
             email.send()
-
-            logger.info(f"Review notification sent for {product.name} to {len(wishlisted_users)} users")
-
+            logger.info(
+                f"Review notification sent for '{product.name}' "
+                f"to {len(wishlisted_users)} users"
+            )
         return "Review notification sent"
-
     except Exception as exc:
-        logger.error(f"Error sending review notification: {str(exc)}")
+        logger.error(f"Error sending review notification: {str(exc)}", exc_info=True)
         raise self.retry(exc=exc, countdown=60)
+
 
 @shared_task(bind=True, max_retries=3)
 def send_wishlist_reminder_email(self, user_id):
-    """Send wishlist reminder email"""
+    """Send a wishlist reminder email to a user."""
     try:
         from wishlist.models import Wishlist
-        from products.models import Product
-
         user = User.objects.get(id=user_id)
         wishlist = Wishlist.objects.get(user=user)
-
         products = wishlist.products.filter(is_active=True)[:5]
-
         if not products:
-            return "No products in wishlist"
-
-        subject = "Your Wishlist Items - Check Out Now!"
+            return "No active products in wishlist — skipped"
+        subject = "Your Wishlist Items — Don't Miss Out!"
         context = {
             "user_name": user.first_name or user.username,
             "products": products,
@@ -191,10 +189,8 @@ def send_wishlist_reminder_email(self, user_id):
             "frontend_url": settings.FRONTEND_BASE_URL,
             "wishlist_url": f"{settings.FRONTEND_BASE_URL}/wishlist",
         }
-
         html_message = render_to_string("emails/wishlist_reminder.html", context)
         text_message = render_to_string("emails/wishlist_reminder.txt", context)
-
         email = EmailMultiAlternatives(
             subject=subject,
             body=text_message,
@@ -203,26 +199,30 @@ def send_wishlist_reminder_email(self, user_id):
         )
         email.attach_alternative(html_message, "text/html")
         email.send()
-
         logger.info(f"Wishlist reminder sent to {user.email}")
         return f"Wishlist reminder sent to {user.email}"
-
     except Exception as exc:
-        logger.error(f"Error sending wishlist reminder: {str(exc)}")
+        logger.error(f"Error sending wishlist reminder: {str(exc)}", exc_info=True)
         raise self.retry(exc=exc, countdown=60)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Low Stock Alerts
+# ─────────────────────────────────────────────────────────────────────────────
 
 @shared_task(bind=True, max_retries=2)
 def notify_stock_low(self, product_id):
-    """Notify admin when product stock is low — includes direct links to admin panel."""
+    """
+    Notify the admin team when a product's stock falls below the threshold.
+    Includes direct links to the admin panel for quick action.
+    """
     try:
         from products.models import Product
-
         product = Product.objects.get(id=product_id)
         admin_email = getattr(settings, "SALES_NOTIFICATION_EMAIL", "")
         if not admin_email:
             logger.warning("SALES_NOTIFICATION_EMAIL not set — skipping low stock alert")
             return "Skipped: no admin email configured"
-
         frontend_url = getattr(settings, "FRONTEND_BASE_URL", "")
         context = {
             "product_name": product.name,
@@ -233,13 +233,13 @@ def notify_stock_low(self, product_id):
             "admin_product_url": f"{frontend_url}/admin/products/{product.id}",
             "admin_inventory_url": f"{frontend_url}/admin/inventory",
         }
-
         html_message = render_to_string("emails/admin_low_stock.html", context)
         plain_message = (
             f"LOW STOCK ALERT\n\n"
-            f"Product: {product.name} (ID: {product.id})\n"
-            f"Current Stock: {product.inventory.stock} units\n"
-            f"Threshold: 10 units\n\n"
+            f"Product  : {product.name} (ID: {product.id})\n"
+            f"Stock    : {product.inventory.stock} units remaining\n"
+            f"Threshold: 10 units\n"
+            f"Detected : {context['detected_at']}\n\n"
             f"Admin link: {context['admin_product_url']}"
         )
         msg = EmailMultiAlternatives(
@@ -250,16 +250,20 @@ def notify_stock_low(self, product_id):
         )
         msg.attach_alternative(html_message, "text/html")
         msg.send()
-        logger.warning(f"Low stock notification sent for {product.name}")
+        logger.warning(f"Low stock notification sent for '{product.name}'")
         return f"Low stock notification sent for {product.name}"
-
     except Exception as exc:
-        logger.error(f"Error sending low stock notification: {str(exc)}")
+        logger.error(f"Error sending low stock notification: {str(exc)}", exc_info=True)
         raise self.retry(exc=exc, countdown=300)
+
 
 @shared_task(bind=True, max_retries=2)
 def check_stock_alerts(self):
-    """Periodic task to check and notify about back-in-stock items."""
+    """
+    Periodic task — scans all products for low stock and dispatches
+    alert emails to users who wishlisted those products.
+    Uses a single grouped query instead of one query per product (avoids N+1).
+    """
     try:
         from collections import defaultdict
         from products.models import Product
@@ -273,11 +277,12 @@ def check_stock_alerts(self):
         )
 
         if not low_stock_products:
-            logger.info("Stock alert check completed. 0 products checked")
+            logger.info("Stock alert check: no low-stock products found")
             return "Stock alert check completed (no low stock)"
 
         product_ids = [p.id for p in low_stock_products]
 
+        # Single grouped query instead of N queries
         rows = Wishlist.objects.filter(
             products__id__in=product_ids
         ).values_list("products__id", "user__email")
@@ -295,46 +300,75 @@ def check_stock_alerts(self):
                 dispatched += 1
 
         logger.info(
-            f"Stock alert check completed. {len(low_stock_products)} products "
-            f"checked, {dispatched} alert batches dispatched"
+            f"Stock alert check: {len(low_stock_products)} products checked, "
+            f"{dispatched} alert batches dispatched"
         )
         return "Stock alert check completed"
-
     except Exception as exc:
-        logger.error(f"Error in stock alert check: {str(exc)}")
+        logger.error(f"Error in stock alert check: {str(exc)}", exc_info=True)
         raise self.retry(exc=exc, countdown=300)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OTP Email
+# ─────────────────────────────────────────────────────────────────────────────
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=30)
+def send_otp_email_task(self, subject, message, recipient_list):
+    """
+    Send OTP and password reset emails asynchronously.
+    Used for resend OTP flow — registration OTP is sent synchronously
+    in the view since it is on the critical registration path.
+    """
+    from core.utils.helpers import safe_send_mail
+    try:
+        sent = safe_send_mail(subject, message, recipient_list)
+        if not sent:
+            raise RuntimeError("safe_send_mail returned False — email not delivered")
+        logger.info(f"OTP email sent to {recipient_list}")
+        return f"OTP email sent to {recipient_list}"
+    except Exception as exc:
+        logger.error(f"OTP email failed for {recipient_list}: {exc}", exc_info=True)
+        raise self.retry(exc=exc)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Analytics
+# ─────────────────────────────────────────────────────────────────────────────
 
 @shared_task
 def generate_analytics_snapshot():
-    """Generate and cache analytics snapshots"""
+    """
+    Generate a cached analytics snapshot for the admin dashboard.
+    Runs every hour via Celery beat. Result stored in Redis for 1 hour.
+    """
     try:
         from products.models import Product
         from reviews.models import ProductReview
-        from wishlist.models import Wishlist
         from django.contrib.auth.models import User as UserModel
         from core.cache_utils import CacheManager, LONG_CACHE_TIMEOUT
 
-        total_product_views = Product.objects.count()
-        most_viewed = Product.objects.order_by('-rating').first()
-        least_viewed = Product.objects.order_by('rating').first()
+        total_products = Product.objects.count()
+        most_viewed = Product.objects.order_by("-rating").first()
+        least_viewed = Product.objects.order_by("rating").first()
 
         total_users = UserModel.objects.count()
         today_start = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
         active_today = UserModel.objects.filter(last_login__gte=today_start).count()
 
-        avg_rating = ProductReview.objects.aggregate(Avg('rating'))['rating__avg'] or 0
+        avg_rating = ProductReview.objects.aggregate(Avg("rating"))["rating__avg"] or 0
         most_reviewed = Product.objects.annotate(
-            review_count=Count('reviews')
-        ).order_by('-review_count').first()
+            review_count=Count("reviews")
+        ).order_by("-review_count").first()
 
         most_wishlisted = Product.objects.annotate(
-            wishlist_count=Count('in_wishlists')
-        ).order_by('-wishlist_count').first()
+            wishlist_count=Count("in_wishlists")
+        ).order_by("-wishlist_count").first()
 
         analytics_data = {
             "timestamp": timezone.now().isoformat(),
             "sales_metrics": {
-                "total_products": total_product_views,
+                "total_products": total_products,
                 "most_viewed": most_viewed.name if most_viewed else None,
                 "least_viewed": least_viewed.name if least_viewed else None,
             },
@@ -351,61 +385,79 @@ def generate_analytics_snapshot():
             },
         }
 
-        CacheManager.set_cache(
-            "analytics_snapshot",
-            analytics_data,
-            timeout=LONG_CACHE_TIMEOUT
-        )
-
-        logger.info("Analytics snapshot generated successfully")
+        CacheManager.set_cache("analytics_snapshot", analytics_data, timeout=LONG_CACHE_TIMEOUT)
+        logger.info("Analytics snapshot generated and cached successfully")
         return "Analytics snapshot generated"
-
     except Exception as exc:
-        logger.error(f"Error generating analytics snapshot: {str(exc)}")
+        logger.error(f"Error generating analytics snapshot: {str(exc)}", exc_info=True)
         return f"Error: {str(exc)}"
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=30)
-def send_otp_email_task(self, subject, message, recipient_list):
-    """Send OTP/transactional emails asynchronously."""
-    from core.utils.helpers import safe_send_mail
-    try:
-        sent = safe_send_mail(subject, message, recipient_list)
-        if not sent:
-            raise RuntimeError("safe_send_mail returned False")
-        return f"OTP email sent to {recipient_list}"
-    except Exception as exc:
-        logger.error(f"OTP email failed for {recipient_list}: {exc}")
-        raise self.retry(exc=exc)
 
 @shared_task
 def clean_expired_otps():
-    """Clean up expired OTP records"""
+    """
+    Remove expired OTP verification records from the database.
+    Runs every 10 minutes via Celery beat to keep the table clean.
+    """
     try:
         from accounts.models import OTPVerification
-
-        expired = OTPVerification.objects.filter(
+        deleted_count, _ = OTPVerification.objects.filter(
             expires_at__lt=timezone.now()
         ).delete()
-
-        logger.info(f"Cleaned up {expired[0]} expired OTP records")
-        return f"Cleaned {expired[0]} expired OTP records"
-
+        logger.info(f"Cleaned up {deleted_count} expired OTP records")
+        return f"Cleaned {deleted_count} expired OTP records"
     except Exception as exc:
-        logger.error(f"Error cleaning expired OTPs: {str(exc)}")
+        logger.error(f"Error cleaning expired OTPs: {str(exc)}", exc_info=True)
         return f"Error: {str(exc)}"
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DB Keep-Alive
+# ─────────────────────────────────────────────────────────────────────────────
+
+@shared_task
+def ping_database():
+    """
+    Keep the Neon PostgreSQL database warm.
+
+    Why this exists:
+    Neon free tier automatically suspends the database after 5 minutes of
+    inactivity. When a user makes a request after the DB has suspended, there
+    is a 1-3 second cold-start delay before any query can run. For a product
+    listing page that is already making network calls, this makes the site feel
+    broken.
+
+    This task runs every 4 minutes via Celery beat, issuing a lightweight
+    SELECT 1 query. The DB never gets a chance to suspend, so every user
+    request hits a warm connection and responds in milliseconds.
+
+    Cost: near zero — SELECT 1 uses no compute beyond keeping the connection open.
+    """
+    try:
+        from django.db import connection
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+        logger.debug("DB ping OK — Neon connection alive")
+        return "DB ping OK"
+    except Exception as exc:
+        logger.warning(f"DB ping failed: {exc}")
+        return f"DB ping failed: {exc}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Quote Request Emails
+# ─────────────────────────────────────────────────────────────────────────────
 
 @shared_task(bind=True, max_retries=3)
 def send_customer_request_email(self, request_id):
     """
-    Send HTML email notifications for a customer quote request.
-    - Admin gets full request details with a Reply button.
-    - Customer gets a confirmation with request summary and next steps.
+    Send dual HTML emails when a customer submits a quote request:
+      1. Admin notification with full customer and product details + Reply button.
+      2. Customer confirmation with request summary and next-steps guide.
     """
     try:
         from orders.models import CustomerRequest
-
-        customer_request = CustomerRequest.objects.select_related('product').get(id=request_id)
+        customer_request = CustomerRequest.objects.select_related("product").get(id=request_id)
         product_name = customer_request.product.name if customer_request.product else "N/A"
         submitted_at = customer_request.created_at.strftime("%d %b %Y, %I:%M %p")
 
@@ -420,19 +472,19 @@ def send_customer_request_email(self, request_id):
             "frontend_url": settings.FRONTEND_BASE_URL,
         }
 
-        # ── Admin notification ──────────────────────────────────────────
+        # ── Admin notification ──────────────────────────────────────────────
         admin_email = getattr(settings, "SALES_NOTIFICATION_EMAIL", "")
         if admin_email:
             try:
                 html_body = render_to_string("emails/customer_request_admin.html", context)
                 plain_body = (
                     f"New Quote Request\n\n"
-                    f"Customer: {customer_request.name}\n"
-                    f"Email: {customer_request.email}\n"
-                    f"Phone: {customer_request.phone}\n"
-                    f"Product: {product_name}\n"
-                    f"Quantity: {customer_request.quantity}\n"
-                    f"Notes: {customer_request.description or 'N/A'}\n"
+                    f"Customer : {customer_request.name}\n"
+                    f"Email    : {customer_request.email}\n"
+                    f"Phone    : {customer_request.phone}\n"
+                    f"Product  : {product_name}\n"
+                    f"Quantity : {customer_request.quantity}\n"
+                    f"Notes    : {customer_request.description or 'N/A'}\n"
                     f"Submitted: {submitted_at}"
                 )
                 msg = EmailMultiAlternatives(
@@ -443,22 +495,28 @@ def send_customer_request_email(self, request_id):
                 )
                 msg.attach_alternative(html_body, "text/html")
                 msg.send()
-                logger.info(f"Admin notification sent for customer request {request_id}")
+                logger.info(f"Admin notified for quote request {request_id}")
             except Exception as e:
-                logger.error(f"Failed to send admin notification: {str(e)}", exc_info=True)
+                logger.error(
+                    f"Failed to send admin notification for request {request_id}: {str(e)}",
+                    exc_info=True,
+                )
 
-        # ── Customer confirmation ───────────────────────────────────────
+        # ── Customer confirmation ───────────────────────────────────────────
         try:
             html_body = render_to_string("emails/customer_request_user.html", context)
             plain_body = (
                 f"Dear {customer_request.name},\n\n"
                 f"Thank you for your quote request for {product_name}.\n"
                 f"Our team will contact you soon with pricing and further details.\n\n"
-                f"Request Summary:\n"
-                f"  Product  : {product_name}\n"
-                f"  Quantity : {customer_request.quantity}\n"
-                f"  Date     : {submitted_at}\n\n"
-                f"Best regards,\nNxSys Digital Team\nsales@sriainfotech.com"
+                f"Your Request Summary\n"
+                f"────────────────────\n"
+                f"Product  : {product_name}\n"
+                f"Quantity : {customer_request.quantity}\n"
+                f"Date     : {submitted_at}\n\n"
+                f"Best regards,\n"
+                f"NxSys Digital Sales Team\n"
+                f"sales@sriainfotech.com"
             )
             msg = EmailMultiAlternatives(
                 subject="We received your quote request — NxSys Digital",
@@ -470,29 +528,38 @@ def send_customer_request_email(self, request_id):
             msg.send()
             logger.info(f"Customer confirmation sent for request {request_id}")
         except Exception as e:
-            logger.error(f"Failed to send customer confirmation: {str(e)}", exc_info=True)
+            logger.error(
+                f"Failed to send customer confirmation for request {request_id}: {str(e)}",
+                exc_info=True,
+            )
 
         return f"Emails sent for customer request {request_id}"
 
     except CustomerRequest.DoesNotExist:
-        logger.error(f"Customer request {request_id} not found")
-        return f"Customer request {request_id} not found"
+        logger.error(f"CustomerRequest {request_id} not found")
+        return f"CustomerRequest {request_id} not found"
     except Exception as exc:
-        logger.error(f"Error sending customer request emails: {str(exc)}", exc_info=True)
+        logger.error(
+            f"Unexpected error sending emails for request {request_id}: {str(exc)}",
+            exc_info=True,
+        )
         raise self.retry(exc=exc, countdown=60)
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Enquiry Emails
+# ─────────────────────────────────────────────────────────────────────────────
 
 @shared_task(bind=True, max_retries=3)
 def send_enquiry_email(self, enquiry_id):
     """
-    Send HTML email notifications for a business enquiry.
-    - Admin gets full enquiry details with company info and a Reply button.
-    - Customer gets a confirmation with enquiry summary and next steps.
+    Send dual HTML emails when a business submits an enquiry:
+      1. Admin notification with full company and product details + Reply button.
+      2. Customer confirmation with enquiry summary and next-steps guide.
     """
     try:
         from orders.models import Enquiry
-
-        enquiry = Enquiry.objects.select_related('product').get(id=enquiry_id)
+        enquiry = Enquiry.objects.select_related("product").get(id=enquiry_id)
         product_name = enquiry.product.name if enquiry.product else "General Enquiry"
         submitted_at = enquiry.created_at.strftime("%d %b %Y, %I:%M %p")
 
@@ -509,21 +576,21 @@ def send_enquiry_email(self, enquiry_id):
             "frontend_url": settings.FRONTEND_BASE_URL,
         }
 
-        # ── Admin notification ──────────────────────────────────────────
+        # ── Admin notification ──────────────────────────────────────────────
         admin_email = getattr(settings, "SALES_NOTIFICATION_EMAIL", "")
         if admin_email:
             try:
                 html_body = render_to_string("emails/enquiry_admin.html", context)
                 plain_body = (
-                    f"New Enquiry\n\n"
-                    f"Name: {enquiry.name}\n"
-                    f"Company: {enquiry.company_name}\n"
-                    f"Address: {enquiry.company_address}\n"
-                    f"Email: {enquiry.email}\n"
-                    f"Phone: {enquiry.phone}\n"
-                    f"Product: {product_name}\n"
-                    f"Quantity: {enquiry.quantity}\n"
-                    f"Message: {enquiry.description or 'N/A'}\n"
+                    f"New Business Enquiry\n\n"
+                    f"Name     : {enquiry.name}\n"
+                    f"Company  : {enquiry.company_name}\n"
+                    f"Address  : {enquiry.company_address}\n"
+                    f"Email    : {enquiry.email}\n"
+                    f"Phone    : {enquiry.phone}\n"
+                    f"Product  : {product_name}\n"
+                    f"Quantity : {enquiry.quantity}\n"
+                    f"Message  : {enquiry.description or 'N/A'}\n"
                     f"Submitted: {submitted_at}"
                 )
                 msg = EmailMultiAlternatives(
@@ -534,23 +601,29 @@ def send_enquiry_email(self, enquiry_id):
                 )
                 msg.attach_alternative(html_body, "text/html")
                 msg.send()
-                logger.info(f"Admin notification sent for enquiry {enquiry_id}")
+                logger.info(f"Admin notified for enquiry {enquiry_id}")
             except Exception as e:
-                logger.error(f"Failed to send admin notification: {str(e)}", exc_info=True)
+                logger.error(
+                    f"Failed to send admin notification for enquiry {enquiry_id}: {str(e)}",
+                    exc_info=True,
+                )
 
-        # ── Customer confirmation ───────────────────────────────────────
+        # ── Customer confirmation ───────────────────────────────────────────
         try:
             html_body = render_to_string("emails/enquiry_user.html", context)
             plain_body = (
                 f"Dear {enquiry.name},\n\n"
                 f"Thank you for contacting NxSys Digital.\n"
-                f"We have received your enquiry and our team will get in touch shortly.\n\n"
-                f"Enquiry Summary:\n"
-                f"  Company  : {enquiry.company_name}\n"
-                f"  Product  : {product_name}\n"
-                f"  Quantity : {enquiry.quantity}\n"
-                f"  Date     : {submitted_at}\n\n"
-                f"Best regards,\nNxSys Digital Team\nsales@sriainfotech.com"
+                f"We have received your enquiry and our sales team will get in touch shortly.\n\n"
+                f"Your Enquiry Summary\n"
+                f"────────────────────\n"
+                f"Company  : {enquiry.company_name}\n"
+                f"Product  : {product_name}\n"
+                f"Quantity : {enquiry.quantity}\n"
+                f"Date     : {submitted_at}\n\n"
+                f"Best regards,\n"
+                f"NxSys Digital Sales Team\n"
+                f"sales@sriainfotech.com"
             )
             msg = EmailMultiAlternatives(
                 subject="Thank you for your enquiry — NxSys Digital",
@@ -562,7 +635,10 @@ def send_enquiry_email(self, enquiry_id):
             msg.send()
             logger.info(f"Customer confirmation sent for enquiry {enquiry_id}")
         except Exception as e:
-            logger.error(f"Failed to send customer confirmation: {str(e)}", exc_info=True)
+            logger.error(
+                f"Failed to send customer confirmation for enquiry {enquiry_id}: {str(e)}",
+                exc_info=True,
+            )
 
         return f"Emails sent for enquiry {enquiry_id}"
 
@@ -570,15 +646,23 @@ def send_enquiry_email(self, enquiry_id):
         logger.error(f"Enquiry {enquiry_id} not found")
         return f"Enquiry {enquiry_id} not found"
     except Exception as exc:
-        logger.error(f"Error sending enquiry emails: {str(exc)}", exc_info=True)
+        logger.error(
+            f"Unexpected error sending emails for enquiry {enquiry_id}: {str(exc)}",
+            exc_info=True,
+        )
         raise self.retry(exc=exc, countdown=60)
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Quote Status Update Email
+# ─────────────────────────────────────────────────────────────────────────────
 
 @shared_task(bind=True, max_retries=3)
 def send_quote_status_email(self, request_id, new_status):
     """
-    Send a status update email to the customer when admin changes
-    a CustomerRequest status (pending → quote_sent or → closed).
+    Notify the customer when admin updates the status of their quote request.
+    Triggered automatically from orders/views.py PUT endpoint on status change.
+    Statuses: pending → quote_sent → closed
     """
     try:
         from orders.models import CustomerRequest
@@ -608,7 +692,7 @@ def send_quote_status_email(self, request_id, new_status):
                 "message": (
                     f"Great news! We have prepared a quote for {product_name} and our sales team "
                     f"will be in touch with you shortly with pricing and availability details. "
-                    f"Please check your email or contact us at sales@sriainfotech.com."
+                    f"Please check your inbox or contact us at sales@sriainfotech.com."
                 ),
             },
             CustomerRequest.STATUS_CLOSED: {
@@ -620,7 +704,7 @@ def send_quote_status_email(self, request_id, new_status):
                 "message": (
                     f"Your request for {product_name} has been closed. "
                     f"If you have any further questions or need assistance, "
-                    f"please don't hesitate to reach out to us at sales@sriainfotech.com."
+                    f"please do not hesitate to reach out at sales@sriainfotech.com."
                 ),
             },
         }
@@ -645,12 +729,16 @@ def send_quote_status_email(self, request_id, new_status):
         plain_body = (
             f"Dear {req.name},\n\n"
             f"Your quote request status has been updated.\n\n"
-            f"Product : {product_name}\n"
-            f"Quantity: {req.quantity}\n"
-            f"Status  : {status_info['label']}\n"
-            f"Updated : {updated_at}\n\n"
+            f"Update Details\n"
+            f"──────────────\n"
+            f"Product  : {product_name}\n"
+            f"Quantity : {req.quantity}\n"
+            f"Status   : {status_info['label']}\n"
+            f"Updated  : {updated_at}\n\n"
             f"{status_info['message']}\n\n"
-            f"Best regards,\nNxSys Digital Team\nsales@sriainfotech.com"
+            f"Best regards,\n"
+            f"NxSys Digital Sales Team\n"
+            f"sales@sriainfotech.com"
         )
         msg = EmailMultiAlternatives(
             subject=f"Quote Update: {status_info['title']} — {product_name}",
@@ -660,9 +748,18 @@ def send_quote_status_email(self, request_id, new_status):
         )
         msg.attach_alternative(html_body, "text/html")
         msg.send()
-        logger.info(f"Quote status email sent to {req.email} for request {request_id} — {new_status}")
+        logger.info(
+            f"Quote status email sent to {req.email} "
+            f"for request {request_id} — status: {new_status}"
+        )
         return f"Quote status email sent for request {request_id}"
 
+    except CustomerRequest.DoesNotExist:
+        logger.error(f"CustomerRequest {request_id} not found — cannot send status email")
+        return f"CustomerRequest {request_id} not found"
     except Exception as exc:
-        logger.error(f"Error sending quote status email for request {request_id}: {exc}", exc_info=True)
+        logger.error(
+            f"Error sending quote status email for request {request_id}: {exc}",
+            exc_info=True,
+        )
         raise self.retry(exc=exc, countdown=60)

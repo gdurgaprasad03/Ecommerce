@@ -1,19 +1,3 @@
-"""
-Django settings for the e-commerce project.
-
-Key changes from previous version:
-1. CELERY_TASK_ALWAYS_EAGER now defaults to False (was True).
-   This is the main fix that makes Celery worker actually do background work.
-   To force eager mode (for tests), set env var CELERY_EAGER=True.
-
-2. EMAIL_BACKEND logic simplified into clean if/elif/else.
-
-3. Removed deprecated DEFAULT_FILE_STORAGE; STORAGES dict is the modern replacement.
-
-4. ALLOWED_HOSTS in DEBUG no longer mixes "*" with specific entries.
-
-5. CONN_HEALTH_CHECKS already correctly enabled via dj_database_url.parse().
-"""
 from pathlib import Path
 import os
 import socket
@@ -25,9 +9,8 @@ from dotenv import load_dotenv
 import dj_database_url
 
 
-
 def get_local_ip():
-    """Detect the LAN IP for cross-laptop frontend/backend testing."""
+    """Detect the LAN IP for cross-laptop frontend/backend development."""
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 80))
@@ -45,6 +28,9 @@ load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Core Security
+# ─────────────────────────────────────────────────────────────────────────────
 
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY")
 if not SECRET_KEY or SECRET_KEY == "REPLACE_WITH_STRONG_SECRET_KEY_50_CHARS_MIN":
@@ -101,6 +87,9 @@ else:
     ]
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Installed Apps
+# ─────────────────────────────────────────────────────────────────────────────
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -136,6 +125,9 @@ INSTALLED_APPS.extend([
 ])
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Middleware
+# ─────────────────────────────────────────────────────────────────────────────
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
@@ -169,22 +161,42 @@ TEMPLATES = [
 WSGI_APPLICATION = "config.wsgi.application"
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Database
+#
+# Optimisations:
+#   conn_max_age=600  — keep connections alive for 10 min per Gunicorn worker
+#                       (was 60 — too aggressive reconnection to Neon pooler)
+#   conn_health_checks=True — verify connection is still alive before reuse
+#                             prevents "connection already closed" errors after
+#                             idle periods
+#   Pooler URL       — use -pooler hostname in DATABASE_URL (not direct)
+#                      PgBouncer connection pooling reduces per-request overhead
+#   channel_binding  — must NOT be in DATABASE_URL for pooler connections
+# ─────────────────────────────────────────────────────────────────────────────
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 if not DATABASE_URL:
-    raise ImproperlyConfigured("DATABASE_URL must be set for the PostgreSQL database.")
+    raise ImproperlyConfigured(
+        "DATABASE_URL must be set. "
+        "Use the pooler URL from Neon dashboard, e.g.: "
+        "postgresql://user:pass@ep-xxx-pooler.region.aws.neon.tech/neondb?sslmode=require"
+    )
 
 DATABASES = {
     "default": dj_database_url.parse(
         DATABASE_URL,
-        conn_max_age=int(os.getenv("DB_CONN_MAX_AGE", "60")),
+        conn_max_age=int(os.getenv("DB_CONN_MAX_AGE", "600")),
         conn_health_checks=os.getenv("DB_CONN_HEALTH_CHECKS", "True").lower() in ["true", "1"],
         ssl_require=os.getenv("DB_SSL_REQUIRE", "True").lower() in ["true", "1"],
     )
 }
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Authentication & REST Framework
+# ─────────────────────────────────────────────────────────────────────────────
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
@@ -231,11 +243,19 @@ SIMPLE_JWT = {
 }
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Internationalisation
+# ─────────────────────────────────────────────────────────────────────────────
 
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = os.getenv("DJANGO_TIME_ZONE", "Asia/Kolkata")
 USE_I18N = True
 USE_TZ = True
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Static & Media Files
+# ─────────────────────────────────────────────────────────────────────────────
 
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
@@ -263,28 +283,37 @@ STORAGES = {
     },
 }
 
+# Keep for compatibility with older Django versions
 DEFAULT_FILE_STORAGE = STORAGES["default"]["BACKEND"]
 STATICFILES_STORAGE = STORAGES["staticfiles"]["BACKEND"]
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Email
+#
+# Optimisation: production now uses smtp.EmailBackend directly.
+# Previously used CeleryEmailBackend which double-wrapped every email —
+# the task sends it once, the backend queued it a second time via Celery.
+# Now the task sends directly via SMTP. No double-wrapping.
+#
+# Email flow:
+#   view.py  →  task.delay()  →  Celery worker  →  SMTP  →  Office 365  →  inbox
+# ─────────────────────────────────────────────────────────────────────────────
 
 EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
 
 if DEBUG and not EMAIL_HOST_USER:
+    # No SMTP credentials in local .env — print emails to terminal
     EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
-elif DEBUG:
+else:
+    # Both debug-with-SMTP and production use direct SMTP
     EMAIL_BACKEND = os.getenv(
         "EMAIL_BACKEND",
         "django.core.mail.backends.smtp.EmailBackend",
     )
-else:
-    EMAIL_BACKEND = os.getenv(
-        "EMAIL_BACKEND",
-        "djcelery_email.backends.CeleryEmailBackend",
-    )
 
-EMAIL_HOST = os.getenv("EMAIL_HOST", "smtp.gmail.com")
+EMAIL_HOST = os.getenv("EMAIL_HOST", "smtp.office365.com")
 EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587"))
 EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "True").lower() in ["true", "1"]
 EMAIL_USE_SSL = os.getenv("EMAIL_USE_SSL", "False").lower() in ["true", "1"]
@@ -292,21 +321,24 @@ EMAIL_TIMEOUT = int(os.getenv("EMAIL_TIMEOUT", "10"))
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", EMAIL_HOST_USER or "test@example.com")
 SALES_NOTIFICATION_EMAIL = os.getenv("SALES_NOTIFICATION_EMAIL", DEFAULT_FROM_EMAIL)
 
-CELERY_EMAIL_TASK_CONFIG = {
-    "rate_limit": "50/m",
-}
 EMAIL_RETRY_INTERVAL = int(os.getenv("EMAIL_RETRY_INTERVAL", "60"))
 EMAIL_MAX_RETRIES = int(os.getenv("EMAIL_MAX_RETRIES", "3"))
 
 FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", f"http://{LOCAL_IP}:5173")
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# OTP Settings
+# ─────────────────────────────────────────────────────────────────────────────
 
 OTP_EXPIRY_MINUTES = int(os.getenv("OTP_EXPIRY_MINUTES", "10"))
 OTP_MAX_ATTEMPTS = int(os.getenv("OTP_MAX_ATTEMPTS", "5"))
 OTP_RESEND_COOLDOWN_SECONDS = int(os.getenv("OTP_RESEND_COOLDOWN_SECONDS", "60"))
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Cache (Redis)
+# ─────────────────────────────────────────────────────────────────────────────
 
 CACHES = {
     "default": {
@@ -329,6 +361,9 @@ CACHES = {
 }
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Celery
+# ─────────────────────────────────────────────────────────────────────────────
 
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://127.0.0.1:6379/1")
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://127.0.0.1:6379/2")
@@ -340,25 +375,38 @@ CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = 30 * 60
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 
+# Set CELERY_EAGER=True in local .env to run tasks synchronously (no worker needed)
 CELERY_TASK_ALWAYS_EAGER = os.getenv("CELERY_EAGER", "False").lower() in ["true", "1"]
 CELERY_TASK_EAGER_PROPAGATES = CELERY_TASK_ALWAYS_EAGER
 
 CELERY_BEAT_SCHEDULE = {
+    # Removes expired OTP rows from the DB every 10 minutes
     "clean-expired-otps": {
         "task": "core.tasks.clean_expired_otps",
         "schedule": 600.0,
     },
+    # Rebuilds the analytics cache every hour
     "generate-analytics-snapshot": {
         "task": "core.tasks.generate_analytics_snapshot",
         "schedule": 3600.0,
     },
+    # Checks low-stock products and emails interested users every 30 minutes
     "check-and-notify-stock-alerts": {
         "task": "core.tasks.check_stock_alerts",
         "schedule": 1800.0,
     },
+    # Keeps Neon DB warm — prevents cold start delays on free tier
+    # Runs every 4 minutes so the DB never hits the 5-minute suspend threshold
+    "keep-db-warm": {
+        "task": "core.tasks.ping_database",
+        "schedule": 240.0,
+    },
 }
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Misc
+# ─────────────────────────────────────────────────────────────────────────────
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
@@ -367,11 +415,13 @@ if os.getenv("USE_ELASTICSEARCH", "False").lower() in ["true", "1"]:
         "default": {
             "hosts": os.getenv("ELASTICSEARCH_HOSTS", "http://localhost:9200").split(","),
             "timeout": 20,
-            "verify_certs": os.getenv("ELASTICSEARCH_VERIFY_CERTS", "True").lower() in ["true", "1"],
+            "verify_certs": os.getenv(
+                "ELASTICSEARCH_VERIFY_CERTS", "True"
+            ).lower() in ["true", "1"],
             "ca_certs": os.getenv("ELASTICSEARCH_CA_CERTS", None),
             "http_auth": (
                 os.getenv("ELASTICSEARCH_USERNAME", ""),
-                os.getenv("ELASTICSEARCH_PASSWORD", "")
+                os.getenv("ELASTICSEARCH_PASSWORD", ""),
             ) if os.getenv("ELASTICSEARCH_USERNAME") else None,
         }
     }
@@ -382,6 +432,9 @@ ANALYTICS_CACHE_TIMEOUT = int(os.getenv("ANALYTICS_CACHE_TIMEOUT", "3600"))
 ENABLE_ANALYTICS = os.getenv("ENABLE_ANALYTICS", "True").lower() in ["true", "1"]
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# HTTP Security Headers
+# ─────────────────────────────────────────────────────────────────────────────
 
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
@@ -403,6 +456,9 @@ else:
     SECURE_HSTS_SECONDS = 0
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Logging
+# ─────────────────────────────────────────────────────────────────────────────
 
 LOGS_DIR = BASE_DIR / "logs"
 LOGS_DIR.mkdir(exist_ok=True)
@@ -435,7 +491,7 @@ LOGGING = {
             "level": "WARNING",
             "class": _FILE_HANDLER_CLASS,
             "filename": str(LOGS_DIR / "django.log"),
-            "maxBytes": 1024 * 1024 * 10,
+            "maxBytes": 1024 * 1024 * 10,  # 10 MB
             "backupCount": 5,
             "formatter": "verbose",
         },
@@ -471,7 +527,11 @@ LOGGING = {
 logging.config.dictConfig(LOGGING)
 
 
-DATA_UPLOAD_MAX_MEMORY_SIZE = 50 * 1024 * 1024
-FILE_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024
+# ─────────────────────────────────────────────────────────────────────────────
+# Upload Limits
+# ─────────────────────────────────────────────────────────────────────────────
+
+DATA_UPLOAD_MAX_MEMORY_SIZE = 50 * 1024 * 1024   # 50 MB
+FILE_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024   # 10 MB
 DATA_UPLOAD_MAX_NUMBER_FIELDS = 2000
 DATA_UPLOAD_MAX_NUMBER_FILES = 100
