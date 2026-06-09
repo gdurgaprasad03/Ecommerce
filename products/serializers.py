@@ -8,6 +8,7 @@ from .models import Brand, Category, Product, ProductImage, ProductSpecification
 
 logger = logging.getLogger(__name__)
 
+
 class BrandSerializer(SanitizedModelSerializer):
     class Meta:
         model = Brand
@@ -33,47 +34,29 @@ class CategoryReadSerializer(SanitizedModelSerializer):
 
     def get_subcategories(self, obj):
         depth = self.context.get("depth", 0)
-        max_depth = 3
-        if depth >= max_depth:
+        if depth >= 3:
             return []
         return CategoryReadSerializer(
-            obj.subcategories.all(),
-            many=True,
-            context={"depth": depth + 1},
-        ).data
+            obj.subcategories.all(), many=True, context={"depth": depth + 1}).data
 
 
 class CategoryWriteSerializer(SanitizedModelSerializer):
     class Meta:
         model = Category
         fields = ["id", "name", "parent", "navbar_group", "is_active"]
- 
+
     def validate(self, attrs):
-        """
-        Enforce the (name, parent) unique constraint at the serializer layer so
-        the user gets a clear 400 error instead of a raw 500 IntegrityError.
-        """
-        # When doing a partial update, fall back to the instance's existing values
-        # for any field that wasn't supplied in the request.
         instance = self.instance
         name = attrs.get("name", getattr(instance, "name", None))
         parent = attrs.get("parent", getattr(instance, "parent", None))
- 
         if name is not None:
             qs = Category.objects.filter(name__iexact=name, parent=parent)
             if instance is not None:
-                # Exclude the current record so a no-change save doesn't false-fire
                 qs = qs.exclude(pk=instance.pk)
             if qs.exists():
                 parent_label = parent.name if parent else "the top level"
                 raise serializers.ValidationError(
-                    {
-                        "name": (
-                            f'A category named "{name}" already exists under {parent_label}. '
-                            "Please choose a different name."
-                        )
-                    }
-                )
+                    {"name": f'A category named "{name}" already exists under {parent_label}. Please choose a different name.'})
         return attrs
 
 
@@ -108,24 +91,6 @@ class ProductSerializer(SanitizedModelSerializer):
         write_only=True,
     )
 
-    def validate_uploaded_images(self, value):
-        validated = []
-        errors = []
-        for idx, f in enumerate(value):
-            try:
-                validated.append(validate_image_file(f))
-            except serializers.ValidationError as e:
-                detail = e.detail if isinstance(e.detail, list) else [e.detail]
-                name = getattr(f, "name", f"image #{idx + 1}")
-                errors.append(f"{name}: {' '.join(str(d) for d in detail)}")
-            except Exception as e:
-                logger.error(f"Error validating product image: {str(e)}", exc_info=True)
-                name = getattr(f, "name", f"image #{idx + 1}")
-                errors.append(f"{name}: validation failed.")
-        if errors:
-            raise serializers.ValidationError(errors)
-        return validated
-
     class Meta:
         model = Product
         fields = [
@@ -133,15 +98,33 @@ class ProductSerializer(SanitizedModelSerializer):
             "name", "product_image", "brand", "brand_name", "mpn", "sku",
             "description", "highlights", "rating", "featured", "top_selling",
             "new_arrival", "is_active", "related_products", "frequently_bought_together",
-            "images", "uploaded_images",
-            "created_at", "updated_at",
+            "images", "uploaded_images", "created_at", "updated_at",
         ]
         read_only_fields = [
             "id", "category_name", "subcategory_name", "brand_name",
             "images", "created_at", "updated_at",
         ]
 
+    def validate_uploaded_images(self, value):
+        validated, errors = [], []
+        for idx, f in enumerate(value):
+            try:
+                validated.append(validate_image_file(f))
+            except serializers.ValidationError as e:
+                detail = e.detail if isinstance(e.detail, list) else [e.detail]
+                errors.append(f"{getattr(f, 'name', f'image #{idx+1}')}: {' '.join(str(d) for d in detail)}")
+            except Exception as e:
+                logger.error(f"Error validating product image: {str(e)}", exc_info=True)
+                errors.append(f"{getattr(f, 'name', f'image #{idx+1}')}: validation failed.")
+        if errors:
+            raise serializers.ValidationError(errors)
+        return validated
+
     def get_images(self, obj):
+        """
+        Uses prefetched images from _build_product_queryset.
+        obj.images.all() hits the prefetch cache — no extra DB query.
+        """
         try:
             request = self.context.get("request")
 
@@ -161,7 +144,7 @@ class ProductSerializer(SanitizedModelSerializer):
                 "id": img.id,
                 "image_url": absolute(img.image.url) if img.image else None,
                 "is_main": False,
-            } for img in obj.images.all())
+            } for img in obj.images.all())   # uses prefetch cache
             return combined
         except Exception as e:
             logger.error(f"Error building product images: {str(e)}", exc_info=True)
@@ -175,20 +158,23 @@ class ProductSerializer(SanitizedModelSerializer):
                 related_products = getattr(instance, "active_related_products", None)
                 if related_products is None:
                     related_products = instance.related_products.filter(is_active=True)
-                representation["related_products"] = ProductMinimalSerializer(related_products, many=True).data
+                representation["related_products"] = ProductMinimalSerializer(
+                    related_products, many=True).data
 
             if "frequently_bought_together" in representation:
                 fbt_products = getattr(instance, "active_fbt_products", None)
                 if fbt_products is None:
                     fbt_products = instance.frequently_bought_together.filter(is_active=True)
-                representation["frequently_bought_together"] = ProductMinimalSerializer(fbt_products, many=True).data
+                representation["frequently_bought_together"] = ProductMinimalSerializer(
+                    fbt_products, many=True).data
 
             frontend_url = getattr(settings, "FRONTEND_BASE_URL", "http://localhost:5173")
             product_url = f"{frontend_url}/products/{instance.id}"
             message = f"Hey, check out this {instance.name} on our site! {product_url}"
             representation["whatsapp_share_link"] = f"https://wa.me/?text={urlencode({'': message})[1:]}"
-
-            representation["meta_title"] = f"{instance.name} | Buy {instance.category.name if instance.category else 'Products'} Online"
+            representation["meta_title"] = (
+                f"{instance.name} | Buy {instance.category.name if instance.category else 'Products'} Online"
+            )
             desc = instance.description or ""
             representation["meta_description"] = (desc[:157] + "...") if len(desc) > 160 else desc
 
@@ -210,21 +196,15 @@ class ProductSerializer(SanitizedModelSerializer):
         try:
             if value is None:
                 return None
-
             value = str(value).strip() if value else ""
-
             if not value:
                 return None
-
             existing = Product.objects.filter(sku=value).exclude(
                 pk=self.instance.pk if self.instance else None
             ).exists()
-
             if existing:
                 raise serializers.ValidationError(
-                    "A product with this SKU already exists. SKU must be unique."
-                )
-
+                    "A product with this SKU already exists. SKU must be unique.")
             return value
         except serializers.ValidationError:
             raise
@@ -278,7 +258,6 @@ class ProductSerializer(SanitizedModelSerializer):
             uploaded_images = validated_data.pop("uploaded_images", [])
             if validated_data.get("sku") == "":
                 validated_data["sku"] = None
-
             product = super().create(validated_data)
             self._save_gallery_images(product, uploaded_images)
             logger.info(f"Product created successfully: {product.id}")
@@ -294,7 +273,6 @@ class ProductSerializer(SanitizedModelSerializer):
             uploaded_images = validated_data.pop("uploaded_images", [])
             if validated_data.get("sku") == "":
                 validated_data["sku"] = None
-
             product = super().update(instance, validated_data)
             self._save_gallery_images(product, uploaded_images)
             logger.info(f"Product updated successfully: {product.id}")
@@ -316,9 +294,7 @@ class ProductImageSerializer(SanitizedModelSerializer):
 
     def get_image_url(self, obj):
         try:
-            if obj.image:
-                return obj.image.url
-            return None
+            return obj.image.url if obj.image else None
         except Exception as e:
             logger.error(f"Error getting image URL: {str(e)}", exc_info=True)
             return None
@@ -346,57 +322,58 @@ class ProductSpecificationSerializer(SanitizedModelSerializer):
         ]
 
     def validate_section(self, value):
-        try:
-            value = value.strip()
-            if not value:
-                raise serializers.ValidationError("Section is required.")
-            return value
-        except serializers.ValidationError:
-            raise
-        except Exception as e:
-            logger.error(f"Error validating section: {str(e)}", exc_info=True)
-            raise serializers.ValidationError("Invalid section value.")
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Section is required.")
+        return value
 
     def validate_key(self, value):
-        try:
-            value = value.strip()
-            if not value:
-                raise serializers.ValidationError("Key is required.")
-            return value
-        except serializers.ValidationError:
-            raise
-        except Exception as e:
-            logger.error(f"Error validating key: {str(e)}", exc_info=True)
-            raise serializers.ValidationError("Invalid key value.")
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Key is required.")
+        return value
 
     def validate_value(self, value):
-        try:
-            value = value.strip()
-            if not value:
-                raise serializers.ValidationError("Value is required.")
-            return value
-        except serializers.ValidationError:
-            raise
-        except Exception as e:
-            logger.error(f"Error validating value: {str(e)}", exc_info=True)
-            raise serializers.ValidationError("Invalid value.")
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Value is required.")
+        return value
 
 
 class CachedProductSerializer(ProductSerializer):
+    """
+    Extends ProductSerializer with:
+    - Redis cache layer for images, specs, reviews, inventory
+    - Falls back to prefetch cache (from views) on Redis miss
+    - No duplicate "images" field — inherited from ProductSerializer
+
+    Query count with full prefetch + Redis warm:  0 DB queries (pure cache)
+    Query count with full prefetch + Redis cold:  0 DB queries (uses prefetch)
+    Query count without prefetch + Redis cold:    4 DB queries (fallback)
+    """
+    # Override images from parent to keep the cached version
     images = serializers.SerializerMethodField()
     specifications = serializers.SerializerMethodField()
     reviews = serializers.SerializerMethodField()
     inventory = serializers.SerializerMethodField()
 
     class Meta(ProductSerializer.Meta):
-        fields = ProductSerializer.Meta.fields + ["images", "specifications", "reviews", "inventory"]
+        # "images" is already in ProductSerializer.Meta.fields
+        # Only add the new fields that CachedProductSerializer introduces
+        fields = ProductSerializer.Meta.fields + ["specifications", "reviews", "inventory"]
 
     def get_images(self, obj):
+        """
+        Redis hit  → return cached data immediately.
+        Redis miss → use prefetch cache from obj.images.all() (no DB query
+                     if views.py used _build_product_queryset).
+        """
         try:
             from core.cache_utils import CacheManager
             cache_key = f"product_images:{obj.id}"
             images = CacheManager.get_cache(cache_key)
             if images is None:
+                # obj.images.all() hits the prefetch cache set in views.py
                 images = ProductImageSerializer(obj.images.all(), many=True).data
                 CacheManager.set_cache(cache_key, images, timeout=3600)
             return images
@@ -405,6 +382,10 @@ class CachedProductSerializer(ProductSerializer):
             return ProductImageSerializer(obj.images.all(), many=True).data
 
     def get_specifications(self, obj):
+        """
+        Redis hit  → return cached data.
+        Redis miss → use prefetch cache (obj.specifications.all()).
+        """
         try:
             from core.cache_utils import CacheManager
             cache_key = f"product_specs:{obj.id}"
@@ -418,12 +399,18 @@ class CachedProductSerializer(ProductSerializer):
             return ProductSpecificationSerializer(obj.specifications.all(), many=True).data
 
     def get_reviews(self, obj):
+        """
+        Redis hit  → return cached data.
+        Redis miss → use prefetch cache (obj.reviews.all()).
+        Slices to 5 most recent reviews for performance.
+        """
         try:
             from core.cache_utils import CacheManager
             from reviews.serializers import ProductReviewSerializer
             cache_key = f"product_reviews:{obj.id}"
             reviews = CacheManager.get_cache(cache_key)
             if reviews is None:
+                # obj.reviews.all() hits the Prefetch cache; [:5] slices in Python
                 reviews = ProductReviewSerializer(obj.reviews.all()[:5], many=True).data
                 CacheManager.set_cache(cache_key, reviews, timeout=1800)
             return reviews
@@ -432,10 +419,16 @@ class CachedProductSerializer(ProductSerializer):
             try:
                 from reviews.serializers import ProductReviewSerializer
                 return ProductReviewSerializer(obj.reviews.all()[:5], many=True).data
-            except:
+            except Exception:
                 return []
 
     def get_inventory(self, obj):
+        """
+        Redis hit  → return cached data.
+        Redis miss → use select_related cache (obj.inventory via JOIN).
+        inventory is now in select_related in views.py so obj.inventory
+        is always available without a DB query.
+        """
         try:
             from core.cache_utils import CacheManager
             from inventory.serializers import InventorySerializer
@@ -443,6 +436,7 @@ class CachedProductSerializer(ProductSerializer):
             inventory = CacheManager.get_cache(cache_key)
             if inventory is None:
                 try:
+                    # obj.inventory uses the select_related JOIN — no DB query
                     inventory = InventorySerializer(obj.inventory).data
                     CacheManager.set_cache(cache_key, inventory, timeout=600)
                 except Exception:
