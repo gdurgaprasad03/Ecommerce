@@ -476,6 +476,8 @@ class ProductListAPIView(APIView):
         except (TypeError, ValueError):
             page, page_size = 1, 20
 
+        page_size = min(max(page_size, 1), 20)
+
         search_params = {
             "category_id": request.query_params.get("category"),
             "subcategory_id": request.query_params.get("subcategory"),

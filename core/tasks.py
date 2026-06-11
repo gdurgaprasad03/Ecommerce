@@ -1,9 +1,3 @@
-"""
-Celery tasks — Email Notifications, Analytics & Background Jobs
-Handles all asynchronous email sending, stock alerts, analytics generation,
-and database keep-alive pings for Neon free tier cold-start prevention.
-"""
-
 from celery import shared_task
 from django.core.mail import EmailMultiAlternatives
 from django.template.loader import render_to_string
@@ -417,22 +411,6 @@ def clean_expired_otps():
 
 @shared_task
 def ping_database():
-    """
-    Keep the Neon PostgreSQL database warm.
-
-    Why this exists:
-    Neon free tier automatically suspends the database after 5 minutes of
-    inactivity. When a user makes a request after the DB has suspended, there
-    is a 1-3 second cold-start delay before any query can run. For a product
-    listing page that is already making network calls, this makes the site feel
-    broken.
-
-    This task runs every 4 minutes via Celery beat, issuing a lightweight
-    SELECT 1 query. The DB never gets a chance to suspend, so every user
-    request hits a warm connection and responds in milliseconds.
-
-    Cost: near zero — SELECT 1 uses no compute beyond keeping the connection open.
-    """
     try:
         from django.db import connection
         with connection.cursor() as cursor:
@@ -450,11 +428,7 @@ def ping_database():
 
 @shared_task(bind=True, max_retries=3)
 def send_customer_request_email(self, request_id):
-    """
-    Send dual HTML emails when a customer submits a quote request:
-      1. Admin notification with full customer and product details + Reply button.
-      2. Customer confirmation with request summary and next-steps guide.
-    """
+
     try:
         from orders.models import CustomerRequest
         customer_request = CustomerRequest.objects.select_related("product").get(id=request_id)
@@ -552,11 +526,6 @@ def send_customer_request_email(self, request_id):
 
 @shared_task(bind=True, max_retries=3)
 def send_enquiry_email(self, enquiry_id):
-    """
-    Send dual HTML emails when a business submits an enquiry:
-      1. Admin notification with full company and product details + Reply button.
-      2. Customer confirmation with enquiry summary and next-steps guide.
-    """
     try:
         from orders.models import Enquiry
         enquiry = Enquiry.objects.select_related("product").get(id=enquiry_id)
@@ -659,11 +628,6 @@ def send_enquiry_email(self, enquiry_id):
 
 @shared_task(bind=True, max_retries=3)
 def send_quote_status_email(self, request_id, new_status):
-    """
-    Notify the customer when admin updates the status of their quote request.
-    Triggered automatically from orders/views.py PUT endpoint on status change.
-    Statuses: pending → quote_sent → closed
-    """
     try:
         from orders.models import CustomerRequest
 

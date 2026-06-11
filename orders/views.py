@@ -7,7 +7,6 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.views import APIView
 from django.conf import settings
 from django.db import IntegrityError, DatabaseError
-
 from .models import CustomerRequest, Enquiry
 from .serializers import CustomerRequestSerializer, CustomerRequestStatusSerializer, EnquirySerializer
 from core.pagination.views import PaginatedAPIView
@@ -65,7 +64,7 @@ class CustomerRequestAPIView(PaginatedAPIView):
             )
 
         except ValidationError:
-            raise  # returns 400 with field errors
+            raise  
 
         except Exception as e:
             logger.error(f"Unexpected error creating customer request: {str(e)}", exc_info=True)
@@ -85,7 +84,7 @@ class CustomerRequestAPIView(PaginatedAPIView):
 
             new_status = req.status
 
-            # Send status update email to customer when status changes
+            
             if old_status != new_status:
                 try:
                     send_quote_status_email.delay(req.id, new_status)
@@ -165,7 +164,7 @@ class EnquiryAPIView(PaginatedAPIView):
             )
 
         except ValidationError:
-            raise  # returns 400 with field errors — fixes the 500 bug
+            raise 
 
         except Exception as e:
             logger.error(f"Unexpected error creating enquiry: {str(e)}", exc_info=True)

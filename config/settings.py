@@ -3,14 +3,12 @@ import os
 import socket
 import logging.config
 from datetime import timedelta
-
 from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 import dj_database_url
 
 
 def get_local_ip():
-    """Detect the LAN IP for cross-laptop frontend/backend development."""
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 80))
@@ -99,6 +97,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "cloudinary_storage",
     "django.contrib.staticfiles",
+    "django.contrib.postgres",
     "cloudinary",
     "corsheaders",
     "rest_framework",
@@ -161,19 +160,7 @@ TEMPLATES = [
 WSGI_APPLICATION = "config.wsgi.application"
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Database
-#
-# Optimisations:
-#   conn_max_age=600  — keep connections alive for 10 min per Gunicorn worker
-#                       (was 60 — too aggressive reconnection to Neon pooler)
-#   conn_health_checks=True — verify connection is still alive before reuse
-#                             prevents "connection already closed" errors after
-#                             idle periods
-#   Pooler URL       — use -pooler hostname in DATABASE_URL (not direct)
-#                      PgBouncer connection pooling reduces per-request overhead
-#   channel_binding  — must NOT be in DATABASE_URL for pooler connections
-# ─────────────────────────────────────────────────────────────────────────────
+
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
@@ -288,26 +275,13 @@ DEFAULT_FILE_STORAGE = STORAGES["default"]["BACKEND"]
 STATICFILES_STORAGE = STORAGES["staticfiles"]["BACKEND"]
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Email
-#
-# Optimisation: production now uses smtp.EmailBackend directly.
-# Previously used CeleryEmailBackend which double-wrapped every email —
-# the task sends it once, the backend queued it a second time via Celery.
-# Now the task sends directly via SMTP. No double-wrapping.
-#
-# Email flow:
-#   view.py  →  task.delay()  →  Celery worker  →  SMTP  →  Office 365  →  inbox
-# ─────────────────────────────────────────────────────────────────────────────
 
 EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
 
 if DEBUG and not EMAIL_HOST_USER:
-    # No SMTP credentials in local .env — print emails to terminal
     EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 else:
-    # Both debug-with-SMTP and production use direct SMTP
     EMAIL_BACKEND = os.getenv(
         "EMAIL_BACKEND",
         "django.core.mail.backends.smtp.EmailBackend",
@@ -374,29 +348,22 @@ CELERY_TIMEZONE = os.getenv("DJANGO_TIME_ZONE", "Asia/Kolkata")
 CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = 30 * 60
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
-
-# Set CELERY_EAGER=True in local .env to run tasks synchronously (no worker needed)
 CELERY_TASK_ALWAYS_EAGER = os.getenv("CELERY_EAGER", "False").lower() in ["true", "1"]
 CELERY_TASK_EAGER_PROPAGATES = CELERY_TASK_ALWAYS_EAGER
 
 CELERY_BEAT_SCHEDULE = {
-    # Removes expired OTP rows from the DB every 10 minutes
     "clean-expired-otps": {
         "task": "core.tasks.clean_expired_otps",
         "schedule": 600.0,
     },
-    # Rebuilds the analytics cache every hour
     "generate-analytics-snapshot": {
         "task": "core.tasks.generate_analytics_snapshot",
         "schedule": 3600.0,
     },
-    # Checks low-stock products and emails interested users every 30 minutes
     "check-and-notify-stock-alerts": {
         "task": "core.tasks.check_stock_alerts",
         "schedule": 1800.0,
     },
-    # Keeps Neon DB warm — prevents cold start delays on free tier
-    # Runs every 4 minutes so the DB never hits the 5-minute suspend threshold
     "keep-db-warm": {
         "task": "core.tasks.ping_database",
         "schedule": 240.0,
