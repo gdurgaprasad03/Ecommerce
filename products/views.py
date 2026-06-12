@@ -371,14 +371,24 @@ class ProductAPIView(PaginatedAPIView):
             queryset = queryset.filter(new_arrival=True)
 
         category_id = request.query_params.get("category")
+        subcategory_id = request.query_params.get("subcategory")
+        brand_id = request.query_params.get("brand")
+
         if category_id:
             queryset = queryset.filter(category_id=category_id)
-        subcategory_id = request.query_params.get("subcategory")
         if subcategory_id:
             queryset = queryset.filter(subcategory_id=subcategory_id)
-        brand_id = request.query_params.get("brand")
         if brand_id:
             queryset = queryset.filter(brand_id=brand_id)
+
+        # Some frontends send a category + subcategory pair that exists in the menu
+        # but currently has no products assigned to that exact subcategory. In that
+        # case, returning the category page results is more useful than an empty list.
+        if not queryset.exists() and category_id and subcategory_id:
+            fallback_queryset = _build_product_queryset(include_inactive=include_inactive)
+            fallback_queryset = fallback_queryset.filter(category_id=category_id)
+            if fallback_queryset.exists():
+                queryset = fallback_queryset
 
         response = self.paginate(request, queryset, ProductSerializer)
 
