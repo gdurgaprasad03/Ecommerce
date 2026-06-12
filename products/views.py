@@ -18,7 +18,8 @@ from .models import Brand, Category, Product, ProductImage, ProductSpecification
 from .serializers import (
     BrandSerializer, CachedProductSerializer, CategoryReadSerializer,
     CategorySerializer, CategorySimpleSerializer, CategoryWriteSerializer,
-    ProductImageSerializer, ProductSerializer, ProductSpecificationSerializer,
+    ProductImageSerializer, ProductListSerializer, ProductSerializer,
+    ProductSpecificationSerializer,
 )
 from .services import BulkProductUploadService
 
@@ -89,28 +90,40 @@ def _build_product_queryset(include_inactive=False):
     return qs
 
 
-def _search_prefetch(qs):
-    """Apply the same prefetch to an arbitrary queryset (used in search path)."""
-    from reviews.models import ProductReview
+def _build_product_list_queryset(include_inactive=False):
+    """
+    Lightweight queryset for list / grid endpoints. Same row filtering as
+    _build_product_queryset, but WITHOUT the detail-only prefetches
+    (reviews, specifications, related_products, frequently_bought_together).
+
+    The list grid only needs scalar fields + brand/category joins + the image
+    gallery, so we skip ~4 extra queries and the per-card relation loading on
+    every page. Pairs with ProductListSerializer.
+    """
+    qs = Product.objects.select_related(
+        "brand",
+        "category",
+        "subcategory",
+        "inventory",          # JOIN — needed for price/stock on the card
+    ).prefetch_related(
+        "images",             # 1 query for all images on the page
+    )
+
+    if not include_inactive:
+        qs = qs.filter(is_active=True)
+
+    return qs
+
+
+def _search_list_prefetch(qs):
+    """
+    Lightweight prefetch for the search results grid — joins + image gallery
+    only, no detail-only relations. Pairs with ProductListSerializer.
+    """
     return qs.select_related(
         "brand", "category", "subcategory", "inventory"
     ).prefetch_related(
         "images",
-        "specifications",
-        Prefetch(
-            "reviews",
-            queryset=ProductReview.objects.select_related("user").order_by("-created_at"),
-        ),
-        Prefetch(
-            "related_products",
-            queryset=Product.objects.filter(is_active=True),
-            to_attr="active_related_products",
-        ),
-        Prefetch(
-            "frequently_bought_together",
-            queryset=Product.objects.filter(is_active=True),
-            to_attr="active_fbt_products",
-        ),
     )
 
 
@@ -361,7 +374,7 @@ class ProductAPIView(PaginatedAPIView):
             and request.query_params.get("include_inactive", "").lower() == "true"
         )
 
-        queryset = _build_product_queryset(include_inactive=include_inactive)
+        queryset = _build_product_list_queryset(include_inactive=include_inactive)
 
         if request.query_params.get("top_selling", "").lower() == "true":
             queryset = queryset.filter(top_selling=True)
@@ -375,9 +388,29 @@ class ProductAPIView(PaginatedAPIView):
         brand_param = request.query_params.get("brand")
 
         if category_id:
-            queryset = queryset.filter(category_id=category_id)
+            try:
+                cat_id_int = int(category_id)
+                sub_ids = list(
+                    Category.objects.filter(parent_id=cat_id_int)
+                    .values_list("id", flat=True)
+                )
+                all_cat_ids = [cat_id_int] + sub_ids
+                queryset = queryset.filter(
+                    Q(category_id__in=all_cat_ids) |
+                    Q(subcategory_id__in=sub_ids)
+                )
+            except (ValueError, TypeError):
+                pass
+
         if subcategory_id:
-            queryset = queryset.filter(subcategory_id=subcategory_id)
+            try:
+                sub_id_int = int(subcategory_id)
+                queryset = queryset.filter(
+                    Q(subcategory_id=sub_id_int) |
+                    Q(category_id=sub_id_int)
+                )
+            except (ValueError, TypeError):
+                pass
         if brand_param:
             try:
                 brand_id = int(str(brand_param).strip())
@@ -389,16 +422,7 @@ class ProductAPIView(PaginatedAPIView):
             else:
                 queryset = queryset.filter(brand__name__iexact=str(brand_param).strip())
 
-        # Some frontends send a category + subcategory pair that exists in the menu
-        # but currently has no products assigned to that exact subcategory. In that
-        # case, returning the category page results is more useful than an empty list.
-        if not queryset.exists() and category_id and subcategory_id:
-            fallback_queryset = _build_product_queryset(include_inactive=include_inactive)
-            fallback_queryset = fallback_queryset.filter(category_id=category_id)
-            if fallback_queryset.exists():
-                queryset = fallback_queryset
-
-        response = self.paginate(request, queryset, ProductSerializer)
+        response = self.paginate(request, queryset, ProductListSerializer)
 
         if request.user.is_authenticated and request.user.is_staff:
             response["Cache-Control"] = "no-store, no-cache, must-revalidate"
@@ -519,9 +543,9 @@ class ProductListAPIView(APIView):
         if search_result:
             product_ids = search_result["ids"]
             preserved_order = {pid: pos for pos, pid in enumerate(product_ids)}
-            queryset = _search_prefetch(Product.objects.filter(id__in=product_ids))
+            queryset = _search_list_prefetch(Product.objects.filter(id__in=product_ids))
             products = sorted(queryset, key=lambda x: preserved_order.get(str(x.id), 0))
-            serializer = ProductSerializer(products, many=True, context={"request": request})
+            serializer = ProductListSerializer(products, many=True, context={"request": request})
             return Response({
                 "count": search_result["total"],
                 "results": serializer.data,
@@ -530,7 +554,42 @@ class ProductListAPIView(APIView):
                 "page_size": page_size,
             })
 
-        queryset = _search_prefetch(Product.objects.filter(is_active=True))
+        queryset = _search_list_prefetch(Product.objects.filter(is_active=True))
+
+        # ── Apply filters in DB fallback (same logic as ProductAPIView) ──────────
+        fallback_category = request.query_params.get("category")
+        if fallback_category:
+            try:
+                cat_id_int = int(fallback_category)
+                sub_ids = list(
+                    Category.objects.filter(parent_id=cat_id_int)
+                    .values_list("id", flat=True)
+                )
+                all_cat_ids = [cat_id_int] + sub_ids
+                queryset = queryset.filter(
+                    Q(category_id__in=all_cat_ids) |
+                    Q(subcategory_id__in=sub_ids)
+                )
+            except (ValueError, TypeError):
+                pass
+
+        fallback_subcategory = request.query_params.get("subcategory")
+        if fallback_subcategory:
+            try:
+                sub_id_int = int(fallback_subcategory)
+                queryset = queryset.filter(
+                    Q(subcategory_id=sub_id_int) | Q(category_id=sub_id_int)
+                )
+            except (ValueError, TypeError):
+                pass
+
+        fallback_brand = request.query_params.get("brand")
+        if fallback_brand:
+            try:
+                queryset = queryset.filter(brand_id=int(fallback_brand))
+            except (ValueError, TypeError):
+                queryset = queryset.filter(brand__name__iexact=fallback_brand)
+
         if search_query:
             queryset = queryset.filter(
                 Q(name__icontains=search_query) | Q(description__icontains=search_query)
@@ -538,7 +597,7 @@ class ProductListAPIView(APIView):
         paginator = PageNumberPagination()
         paginator.page_size = page_size
         page_obj = paginator.paginate_queryset(queryset, request)
-        serializer = ProductSerializer(page_obj, many=True, context={"request": request})
+        serializer = ProductListSerializer(page_obj, many=True, context={"request": request})
         return paginator.get_paginated_response(serializer.data)
 
 

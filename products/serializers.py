@@ -340,6 +340,28 @@ class ProductSpecificationSerializer(SanitizedModelSerializer):
         return value
 
 
+class ProductListSerializer(ProductSerializer):
+    """
+    Lightweight serializer for list / grid endpoints.
+
+    Identical card fields to ProductSerializer but DROPS the two detail-only
+    relation arrays (related_products, frequently_bought_together). Because
+    those fields are absent from `fields`, the inherited to_representation()
+    skips their per-row serialization blocks entirely — which means the list
+    queryset can skip prefetching them (and reviews / specifications, which
+    were never serialized here anyway). No N+1, no wasted DB work.
+
+    Pairs with products.views._build_product_list_queryset.
+    """
+    class Meta(ProductSerializer.Meta):
+        fields = [
+            "id", "category", "category_name", "subcategory", "subcategory_name",
+            "name", "product_image", "brand", "brand_name", "mpn", "sku",
+            "description", "highlights", "rating", "featured", "top_selling",
+            "new_arrival", "is_active", "images", "created_at", "updated_at",
+        ]
+
+
 class CachedProductSerializer(ProductSerializer):
     """
     Extends ProductSerializer with:

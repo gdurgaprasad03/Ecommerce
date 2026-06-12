@@ -17,6 +17,7 @@ class WishlistAPIView(APIView):
     """
     GET  /wishlist/             -> Return current user's wishlist (creates one if missing).
     POST /wishlist/             -> Add a product  (body: { "product_id": 5 })
+    PUT  /wishlist/             -> Bulk-replace wishlist (body: { "products": [1, 2, 3] }).
     DELETE /wishlist/           -> Clear the entire wishlist.
     """
     permission_classes = [IsAuthenticated]
@@ -65,6 +66,34 @@ class WishlistAPIView(APIView):
                 {"error": "Unable to load your wishlist right now. Please try again."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
+    # ------------------------------------------------------------------ #
+    # PUT  /wishlist/   (bulk-replace — merge guest wishlist on login)     #
+    # ------------------------------------------------------------------ #
+    def put(self, request):
+        """
+        PUT /wishlist/wishlist/
+        Body: { "products": [1, 2, 3] }
+        Bulk-replaces the wishlist — used to merge guest wishlist on login.
+        """
+        product_ids = request.data.get("products", [])
+        if not isinstance(product_ids, list):
+            return Response(
+                {"error": "products must be a list of product IDs."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        wishlist, _ = self._get_or_create_wishlist(request.user)
+
+        valid_ids = list(
+            Product.objects.filter(
+                pk__in=product_ids, is_active=True
+            ).values_list("pk", flat=True)
+        )
+
+        wishlist.products.set(valid_ids)   # replaces existing M2M items atomically
+        serializer = WishlistSerializer(wishlist, context={"request": request})
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
     # ------------------------------------------------------------------ #
     # POST /wishlist/   (add a product)                                    #

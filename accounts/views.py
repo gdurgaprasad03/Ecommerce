@@ -198,7 +198,8 @@ class VerifyOTPAPIView(APIView):
             if not created:
                 if not user.is_active:
                     user.is_active = True
-                    user.save(update_fields=["is_active"])
+                    user.set_password(registration_data["password"])
+                    user.save(update_fields=["is_active", "password"])
             else:
                 user.set_password(registration_data["password"])
                 user.save(update_fields=["password"])
