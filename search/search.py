@@ -105,8 +105,17 @@ class ElasticsearchSearchManager:
                 s = s.filter('term', category__id=kwargs['category_id'])
             if kwargs.get('subcategory_id'):
                 s = s.filter('term', subcategory__id=kwargs['subcategory_id'])
-            if kwargs.get('brand_id'):
-                s = s.filter('term', brand__id=kwargs['brand_id'])
+            brand_param = kwargs.get('brand_id')
+            if brand_param:
+                try:
+                    brand_id = int(str(brand_param).strip())
+                except (TypeError, ValueError):
+                    brand_id = None
+
+                if brand_id is not None:
+                    s = s.filter('term', brand__id=brand_id)
+                else:
+                    s = s.filter('match', brand__name=str(brand_param).strip())
             if kwargs.get('featured'):
                 s = s.filter('term', featured='yes')
             if kwargs.get('top_selling'):

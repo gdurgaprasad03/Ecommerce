@@ -372,14 +372,22 @@ class ProductAPIView(PaginatedAPIView):
 
         category_id = request.query_params.get("category")
         subcategory_id = request.query_params.get("subcategory")
-        brand_id = request.query_params.get("brand")
+        brand_param = request.query_params.get("brand")
 
         if category_id:
             queryset = queryset.filter(category_id=category_id)
         if subcategory_id:
             queryset = queryset.filter(subcategory_id=subcategory_id)
-        if brand_id:
-            queryset = queryset.filter(brand_id=brand_id)
+        if brand_param:
+            try:
+                brand_id = int(str(brand_param).strip())
+            except (TypeError, ValueError):
+                brand_id = None
+
+            if brand_id is not None:
+                queryset = queryset.filter(brand_id=brand_id)
+            else:
+                queryset = queryset.filter(brand__name__iexact=str(brand_param).strip())
 
         # Some frontends send a category + subcategory pair that exists in the menu
         # but currently has no products assigned to that exact subcategory. In that

@@ -48,8 +48,8 @@ def cache_product_list(timeout=300):
                 return view_func(self, request, *args, **kwargs)
             
             relevant_params = [
-                "category", "subcategory", "top_selling", "featured", "new_arrival",
-                "page", "page_size",
+                "category", "subcategory", "brand", "top_selling", "featured",
+                "new_arrival", "page", "page_size",
             ]
             cache_key = generate_cache_key("product_list", request, relevant_params)
             
