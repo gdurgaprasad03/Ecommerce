@@ -353,6 +353,14 @@ class BulkProductUploadService:
         return category
 
     @staticmethod
+    def get_or_create_subcategory(parent_category, subcategory_name):
+        name = clean_str(subcategory_name)
+        if not name:
+            return None
+        subcategory, _ = Category.objects.get_or_create(name=name, parent=parent_category)
+        return subcategory
+
+    @staticmethod
     def get_or_create_brand(brand_name):
         name = clean_str(brand_name)
         if not name:
@@ -368,6 +376,12 @@ class BulkProductUploadService:
     def _build_product_in_transaction(self, row, row_num):
         with transaction.atomic():
             category = self.get_or_create_category(row.get("category"))
+            subcategory_name = (
+                clean_str(row.get("subcategory"))
+                or clean_str(row.get("sub_category"))
+                or clean_str(row.get("subCategory"))
+            )
+            subcategory = self.get_or_create_subcategory(category, subcategory_name) if subcategory_name else None
             brand = self.get_or_create_brand(row.get("brand"))
 
             sku = clean_str(row.get("sku"))
@@ -384,6 +398,7 @@ class BulkProductUploadService:
             product = Product.objects.create(
                 name=name,
                 category=category,
+                subcategory=subcategory,
                 brand=brand,
                 sku=sku,
                 mpn=clean_str(row.get("mpn")),
