@@ -84,6 +84,10 @@ else:
         if origin.strip()
     ]
 
+# Required so the browser actually sends/stores the refresh-token cookie on
+# cross-origin requests (frontend and backend run on different ports/hosts).
+CORS_ALLOW_CREDENTIALS = True
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Installed Apps
@@ -95,10 +99,8 @@ INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
-    "cloudinary_storage",
     "django.contrib.staticfiles",
     "django.contrib.postgres",
-    "cloudinary",
     "corsheaders",
     "rest_framework",
     "rest_framework_simplejwt.token_blacklist",
@@ -229,6 +231,15 @@ SIMPLE_JWT = {
     "AUTH_HEADER_TYPES": ("Bearer",),
 }
 
+# The refresh token is delivered as an httpOnly cookie instead of in the
+# response body; the access token still goes in the JSON body / Authorization
+# header as before. Cookie is scoped to ACCOUNTS_URL_PREFIX so the browser
+# only attaches it to the refresh/logout endpoints that need it.
+ACCOUNTS_URL_PREFIX = "/accounts/"
+REFRESH_TOKEN_COOKIE_NAME = "refresh_token"
+REFRESH_TOKEN_COOKIE_SECURE = not DEBUG
+REFRESH_TOKEN_COOKIE_SAMESITE = "Lax"
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Internationalisation
@@ -250,16 +261,13 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
-CLOUDINARY_STORAGE = {
-    "CLOUD_NAME": os.getenv("CLOUDINARY_CLOUD_NAME", ""),
-    "API_KEY": os.getenv("CLOUDINARY_API_KEY", ""),
-    "API_SECRET": os.getenv("CLOUDINARY_API_SECRET", ""),
-    "SECURE": True,
-}
+IMAGEKIT_PUBLIC_KEY = os.getenv("IMAGEKIT_PUBLIC_KEY", "")
+IMAGEKIT_PRIVATE_KEY = os.getenv("IMAGEKIT_PRIVATE_KEY", "")
+IMAGEKIT_URL_ENDPOINT = os.getenv("IMAGEKIT_URL_ENDPOINT", "")
 
 STORAGES = {
     "default": {
-        "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage",
+        "BACKEND": "core.storage.ImageKitStorage",
     },
     "staticfiles": {
         "BACKEND": (

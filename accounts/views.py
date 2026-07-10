@@ -14,6 +14,7 @@ from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle, ScopedRateThrottle
 from rest_framework.views import APIView
 from rest_framework_simplejwt.exceptions import TokenError
+from rest_framework_simplejwt.serializers import TokenRefreshSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import CustomerProfile, OTPVerification
@@ -32,6 +33,25 @@ logger = logging.getLogger(__name__)
 OTP_EXPIRY_MINUTES = getattr(settings, "OTP_EXPIRY_MINUTES", 10)
 OTP_MAX_ATTEMPTS = getattr(settings, "OTP_MAX_ATTEMPTS", 5)
 OTP_RESEND_COOLDOWN_SECONDS = getattr(settings, "OTP_RESEND_COOLDOWN_SECONDS", 60)
+
+REFRESH_TOKEN_COOKIE_NAME = settings.REFRESH_TOKEN_COOKIE_NAME
+REFRESH_TOKEN_COOKIE_PATH = settings.ACCOUNTS_URL_PREFIX
+
+
+def set_refresh_cookie(response, refresh_token):
+    response.set_cookie(
+        REFRESH_TOKEN_COOKIE_NAME,
+        str(refresh_token),
+        max_age=int(settings.SIMPLE_JWT["REFRESH_TOKEN_LIFETIME"].total_seconds()),
+        httponly=True,
+        secure=settings.REFRESH_TOKEN_COOKIE_SECURE,
+        samesite=settings.REFRESH_TOKEN_COOKIE_SAMESITE,
+        path=REFRESH_TOKEN_COOKIE_PATH,
+    )
+
+
+def clear_refresh_cookie(response):
+    response.delete_cookie(REFRESH_TOKEN_COOKIE_NAME, path=REFRESH_TOKEN_COOKIE_PATH)
 
 
 def _send_otp_html_email(subject, email, otp, expiry_minutes, template_name, extra_context=None):
@@ -328,13 +348,14 @@ class LoginAPIView(APIView):
                 logger.error(f"Error queuing welcome email for user {user.id}: {str(e)}", exc_info=True)
 
         refresh = RefreshToken.for_user(user)
-        return Response({
+        response = Response({
             "message": "Login successful.",
             "access": str(refresh.access_token),
-            "refresh": str(refresh),
             "username": user.username,
             "is_staff": user.is_staff,
         }, status=status.HTTP_200_OK)
+        set_refresh_cookie(response, refresh)
+        return response
 
 
 class PasswordResetRequestAPIView(APIView):
@@ -514,21 +535,47 @@ class LogoutAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        refresh_token = request.data.get("refresh_token")
+        refresh_token = request.COOKIES.get(REFRESH_TOKEN_COOKIE_NAME)
+        if refresh_token:
+            try:
+                RefreshToken(refresh_token).blacklist()
+            except TokenError:
+                pass
+
+        response = Response({"message": "Logout successful."}, status=status.HTTP_200_OK)
+        clear_refresh_cookie(response)
+        return response
+
+
+class CookieTokenRefreshView(APIView):
+    """Reads the refresh token from the httpOnly cookie instead of the request body."""
+
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        refresh_token = request.COOKIES.get(REFRESH_TOKEN_COOKIE_NAME)
         if not refresh_token:
             return Response(
-                {"error": "refresh_token is required."},
-                status=status.HTTP_400_BAD_REQUEST,
+                {"error": "Refresh token cookie is missing."},
+                status=status.HTTP_401_UNAUTHORIZED,
             )
+
+        serializer = TokenRefreshSerializer(data={"refresh": refresh_token})
         try:
-            token = RefreshToken(refresh_token)
-            token.blacklist()
+            serializer.is_valid(raise_exception=True)
         except TokenError:
             return Response(
                 {"error": "Invalid or expired refresh token."},
-                status=status.HTTP_400_BAD_REQUEST,
+                status=status.HTTP_401_UNAUTHORIZED,
             )
-        return Response({"message": "Logout successful."}, status=status.HTTP_200_OK)
+
+        response = Response({"access": serializer.validated_data["access"]}, status=status.HTTP_200_OK)
+
+        rotated_refresh = serializer.validated_data.get("refresh")
+        if rotated_refresh:
+            set_refresh_cookie(response, rotated_refresh)
+
+        return response
 
 
 # ─────────────────────────────────────────────────────────────────────────────

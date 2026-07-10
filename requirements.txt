@@ -30,8 +30,7 @@ kombu>=5.3
 vine>=5.1
 
 # Storage / media
-cloudinary>=1.40
-django-cloudinary-storage>=0.3
+imagekitio>=5.7
 pillow>=10.2
 django-colorfield>=0.11
 django-admin-interface>=0.28
