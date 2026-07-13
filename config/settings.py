@@ -41,14 +41,45 @@ if not SECRET_KEY or SECRET_KEY == "REPLACE_WITH_STRONG_SECRET_KEY_50_CHARS_MIN"
 
 DEBUG = os.getenv("DJANGO_DEBUG", "False").lower() in ["true", "1"]
 
+
+def _with_www_variants(hosts):
+    """Given ['example.com'], also add/remove the 'www.' prefix so a single
+    domain in an env var covers both the apex and www hosts. Prevents CORS/CSRF
+    failures caused by the frontend and backend disagreeing on which form to use."""
+    expanded = set()
+    for host in hosts:
+        expanded.add(host)
+        if host.startswith("www."):
+            expanded.add(host[len("www."):])
+        else:
+            expanded.add(f"www.{host}")
+    return sorted(expanded)
+
+
+def _with_www_variants_urls(urls):
+    """Same as _with_www_variants but for full scheme://host URLs."""
+    expanded = set()
+    for url in urls:
+        expanded.add(url)
+        scheme_sep = "://"
+        if scheme_sep not in url:
+            continue
+        scheme, host = url.split(scheme_sep, 1)
+        if host.startswith("www."):
+            expanded.add(f"{scheme}{scheme_sep}{host[len('www.'):]}")
+        else:
+            expanded.add(f"{scheme}{scheme_sep}www.{host}")
+    return sorted(expanded)
+
+
 if DEBUG:
     ALLOWED_HOSTS = ["*"]
 else:
-    ALLOWED_HOSTS = [
+    ALLOWED_HOSTS = _with_www_variants([
         host.strip()
         for host in os.getenv("DJANGO_ALLOWED_HOSTS", "yourdomain.com").split(",")
         if host.strip()
-    ]
+    ])
 
 if DEBUG:
     CSRF_TRUSTED_ORIGINS = [
@@ -58,11 +89,11 @@ if DEBUG:
         f"http://{LOCAL_IP}:5173",
     ]
 else:
-    CSRF_TRUSTED_ORIGINS = [
+    CSRF_TRUSTED_ORIGINS = _with_www_variants_urls([
         origin.strip()
         for origin in os.getenv("CSRF_TRUSTED_ORIGINS", "https://yourdomain.com").split(",")
         if origin.strip()
-    ]
+    ])
 
 USE_X_FORWARDED_HOST = True
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
@@ -78,11 +109,11 @@ if DEBUG:
         f"http://{LOCAL_IP}:8000",
     ]
 else:
-    CORS_ALLOWED_ORIGINS = [
+    CORS_ALLOWED_ORIGINS = _with_www_variants_urls([
         origin.strip()
         for origin in os.getenv("CORS_ALLOWED_ORIGINS", "https://yourdomain.com").split(",")
         if origin.strip()
-    ]
+    ])
 
 # Required so the browser actually sends/stores the refresh-token cookie on
 # cross-origin requests (frontend and backend run on different ports/hosts).
