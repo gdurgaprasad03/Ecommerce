@@ -43,9 +43,6 @@ DEBUG = os.getenv("DJANGO_DEBUG", "False").lower() in ["true", "1"]
 
 
 def _with_www_variants(hosts):
-    """Given ['example.com'], also add/remove the 'www.' prefix so a single
-    domain in an env var covers both the apex and www hosts. Prevents CORS/CSRF
-    failures caused by the frontend and backend disagreeing on which form to use."""
     expanded = set()
     for host in hosts:
         expanded.add(host)
