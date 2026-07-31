@@ -17,8 +17,8 @@ class CustomerRequestSerializer(SanitizedModelSerializer):
     def validate_phone(self, value):
         try:
             normalized = "".join(ch for ch in value if ch.isdigit())
-            if len(normalized) < 10 or len(normalized) > 15:
-                raise serializers.ValidationError("Enter a valid phone number.")
+            if len(normalized) != 10:
+                raise serializers.ValidationError("Enter a valid 10-digit phone number.")
             return normalized
         except Exception as e:
             logger.error(f"Error validating phone number: {str(e)}")
@@ -71,8 +71,8 @@ class EnquirySerializer(SanitizedModelSerializer):
     def validate_phone(self, value):
         try:
             normalized = "".join(ch for ch in value if ch.isdigit())
-            if len(normalized) < 10 or len(normalized) > 15:
-                raise serializers.ValidationError("Enter a valid phone number.")
+            if len(normalized) != 10:
+                raise serializers.ValidationError("Enter a valid 10-digit phone number.")
             return normalized
         except Exception as e:
             logger.error(f"Error validating phone number: {str(e)}")
